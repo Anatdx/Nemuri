@@ -58,8 +58,6 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
-
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     if (
@@ -108,7 +106,4 @@ dependencies {
     implementation(libs.libxposed.service)
     compileOnly(libs.libxposed.api)
     debugImplementation(libs.androidx.compose.ui.tooling)
-    testImplementation(libs.junit)
-    androidTestImplementation(libs.androidx.junit)
-    androidTestImplementation(libs.androidx.espresso.core)
 }
