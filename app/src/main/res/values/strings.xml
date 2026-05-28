@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Nemuri</string>
+    <string name="module_description">App tombstoning and freezing through the modern LSPosed API.</string>
+</resources>
