@@ -105,6 +105,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation(libs.material)
+    implementation(libs.libxposed.service)
     compileOnly(libs.libxposed.api)
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)

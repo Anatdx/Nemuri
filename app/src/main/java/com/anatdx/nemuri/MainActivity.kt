@@ -42,6 +42,7 @@ import com.anatdx.nemuri.ui.NemuriTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        XposedServiceStatus.start()
         enableEdgeToEdge()
         setContent {
             NemuriTheme {
@@ -93,10 +94,22 @@ private fun NemuriApp() {
 
 @Composable
 private fun ModuleStatusCard() {
+    val status = XposedServiceStatus.state.value
+    val containerColor = if (status.active) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.errorContainer
+    }
+    val contentColor = if (status.active) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onErrorContainer
+    }
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.primaryContainer,
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        color = containerColor,
+        contentColor = contentColor,
         shape = RoundedCornerShape(8.dp)
     ) {
         Column(
@@ -104,17 +117,22 @@ private fun ModuleStatusCard() {
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Text(
-                text = "Xposed shell ready",
+                text = if (status.active) "Xposed framework active" else "Xposed framework inactive",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                text = "The APK declares a modern libxposed API 101 module entry and starts with system-server scope for framework-side freezing work.",
+                text = if (status.active) {
+                    "Connected to ${status.frameworkLabel}. Nemuri can query module scope and framework capabilities through libxposed service."
+                } else {
+                    "Open LSPosed, enable Nemuri, keep system framework in scope, then relaunch Nemuri after the framework reloads."
+                },
                 style = MaterialTheme.typography.bodyMedium
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AssistChip(onClick = {}, label = { Text("API 101") })
-                AssistChip(onClick = {}, label = { Text("system scope") })
+                AssistChip(onClick = {}, label = { Text(if (status.active) "active" else "inactive") })
+                AssistChip(onClick = {}, label = { Text("API ${status.apiLabel}") })
+                AssistChip(onClick = {}, label = { Text("${status.scope.size} scope") })
             }
         }
     }
