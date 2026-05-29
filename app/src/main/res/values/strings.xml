@@ -1,4 +1,73 @@
 <resources>
     <string name="app_name">Nemuri</string>
     <string name="module_description">App tombstoning and freezing through the modern LSPosed API.</string>
+    <string name="nav_home">Home</string>
+    <string name="nav_apps">Apps</string>
+    <string name="nav_settings">Settings</string>
+
+    <string name="module_status_working">Working</string>
+    <string name="module_status_stopped">Inactive</string>
+    <string name="nemuri_version_format">Version: %1$s</string>
+    <string name="framework_version_title">Framework</string>
+    <string name="framework_api_title">Framework API</string>
+    <string name="android_version_title">Android</string>
+    <string name="device_title">Device</string>
+    <string name="background_freeze_title">Frozen background apps</string>
+    <string name="background_freeze_count_format">%1$d / %2$d</string>
+    <string name="module_status_active">Module active</string>
+    <string name="module_status_inactive">Module inactive</string>
+    <string name="module_status_active_description">Connected to %1$s. Nemuri can read framework status through libxposed service.</string>
+    <string name="module_status_inactive_description">Enable Nemuri in LSPosed, keep System Framework in scope, then reopen the app after the framework reloads.</string>
+    <string name="status_active_short">active</string>
+    <string name="status_inactive_short">inactive</string>
+    <string name="scope_system">system</string>
+    <string name="xposed_api_title">Xposed API</string>
+    <string name="framework_format">Framework: %1$s</string>
+
+    <string name="apps_title">App list</string>
+    <string name="apps_loading_installed">Reading installed apps</string>
+    <string name="apps_count_format">Showing %1$d / %2$d apps</string>
+    <string name="system_apps_visible">System apps visible</string>
+    <string name="system_apps_hidden">System apps hidden</string>
+    <string name="refresh">Refresh</string>
+    <string name="apps_loading_list">Loading app list</string>
+    <string name="app_type_system">System</string>
+    <string name="app_type_user">User</string>
+    <string name="app_type_system_short">system</string>
+    <string name="app_type_user_short">user</string>
+    <string name="app_filter_menu">App filter</string>
+    <string name="app_filter_user">User</string>
+    <string name="app_filter_system">System</string>
+    <string name="apps_search_action">Search apps</string>
+    <string name="apps_search_close">Close search</string>
+    <string name="apps_search_label">Search apps</string>
+    <string name="apps_search_placeholder">Name or package name</string>
+    <string name="apps_search_result_count">%1$d results</string>
+    <string name="apps_empty">No apps match this filter.</string>
+
+    <string name="policy_enable_freeze">Enable freeze policy</string>
+    <string name="policy_enable_freeze_description">When enabled, Nemuri will include this app in the future freeze policy engine.</string>
+    <string name="policy_relax_charging">Relax while charging</string>
+    <string name="policy_relax_charging_description">Use a more conservative freeze policy while charging to reduce background-task disruption.</string>
+    <string name="policy_block_wakeups">Block abnormal wakeups</string>
+    <string name="policy_block_wakeups_description">Reserved for constraining service starts, broadcast wakeups, and Binder triggers.</string>
+    <string name="policy_enabled_short">enabled</string>
+    <string name="policy_disabled_short">disabled</string>
+    <string name="freeze_strategy_title">Freeze mode</string>
+    <string name="strategy_smart">Smart</string>
+    <string name="strategy_smart_description">Choose freeze timing from background state and recent activity.</string>
+    <string name="strategy_aggressive">Aggressive</string>
+    <string name="strategy_aggressive_description">Freeze background activity sooner for low-wakeup apps.</string>
+    <string name="strategy_disabled">Off</string>
+    <string name="strategy_disabled_description">Keep the saved policy but do not execute freezing.</string>
+    <string name="config_file_title">Config file</string>
+
+    <string name="settings_title">Settings</string>
+    <string name="settings_description">The settings structure is in place. Detailed policy switches will be wired in as the freeze engine lands.</string>
+    <string name="setting_auto_freeze">Auto freeze</string>
+    <string name="setting_auto_freeze_description">Will control the background freeze entry once the policy engine is ready.</string>
+    <string name="setting_wake_guard">Wake guard</string>
+    <string name="setting_wake_guard_description">Reserved for abnormal wakeups, service starts, and Binder interactions.</string>
+    <string name="setting_debug_logs">Debug logs</string>
+    <string name="setting_debug_logs_description">The current hook probes are written to LSPosed logs. Detailed log controls can live here later.</string>
 </resources>

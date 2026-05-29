@@ -1,0 +1,63 @@
+package com.anatdx.nemuri.viewmodel
+
+import android.app.Application
+import com.anatdx.nemuri.data.apps.AppPolicy
+import com.anatdx.nemuri.data.apps.AppPolicyStore
+import com.anatdx.nemuri.data.apps.AppRepository
+import com.anatdx.nemuri.data.apps.InstalledAppInfo
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+data class AppsUiState(
+    val apps: List<InstalledAppInfo> = emptyList(),
+    val policies: Map<String, AppPolicy> = emptyMap(),
+    val loading: Boolean = true,
+)
+
+class AppsViewModel(application: Application) : AndroidViewModel(application) {
+    private val appContext = application.applicationContext
+    private val policyStore = AppPolicyStore(appContext)
+    private val _uiState = MutableStateFlow(AppsUiState())
+    private var preloadJob: Job? = null
+
+    val uiState: StateFlow<AppsUiState> = _uiState.asStateFlow()
+    val configPath: String = policyStore.configPath
+
+    init {
+        refresh()
+    }
+
+    fun refresh() {
+        preloadJob?.cancel()
+        preloadJob = viewModelScope.launch {
+            _uiState.update { it.copy(loading = true) }
+            val loaded = withContext(Dispatchers.IO) {
+                val apps = AppRepository.loadInstalledApps(appContext)
+                val policies = policyStore.loadAll()
+                apps to policies
+            }
+            _uiState.value = AppsUiState(
+                apps = loaded.first,
+                policies = loaded.second,
+                loading = false,
+            )
+        }
+    }
+
+    fun savePolicy(policy: AppPolicy) {
+        _uiState.update { state ->
+            state.copy(policies = state.policies + (policy.packageName to policy))
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            policyStore.save(policy)
+        }
+    }
+}

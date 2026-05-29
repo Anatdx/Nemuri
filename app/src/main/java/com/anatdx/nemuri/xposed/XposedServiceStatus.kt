@@ -1,4 +1,4 @@
-package com.anatdx.nemuri
+package com.anatdx.nemuri.xposed
 
 import android.util.Log
 import androidx.compose.runtime.State
