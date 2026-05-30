@@ -196,7 +196,7 @@ fun NemuriApp(appsViewModel: AppsViewModel) {
             label = "rootPage"
         ) { page ->
             when (page) {
-                NemuriPage.Home -> HomePage(innerPadding)
+                NemuriPage.Home -> HomePage(innerPadding, appsViewModel)
                 NemuriPage.Apps -> AppsPage(
                     innerPadding = innerPadding,
                     appFilter = appFilter,

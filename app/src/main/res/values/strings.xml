@@ -21,6 +21,8 @@
     <string name="background_process_snapshot_error">Bridge error: %1$s</string>
     <string name="background_process_snapshot_detail">uid %1$d - %2$d processes - state %3$d</string>
     <string name="background_process_snapshot_refresh">Refresh background snapshot</string>
+    <string name="background_process_list_title">Processes</string>
+    <string name="background_process_item_detail">pid %1$d - state %2$d</string>
     <string name="module_status_active">Module active</string>
     <string name="module_status_inactive">Module inactive</string>
     <string name="module_status_active_description">Connected to %1$s. Nemuri can read framework status through libxposed service.</string>
