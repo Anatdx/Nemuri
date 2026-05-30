@@ -21,38 +21,73 @@ import androidx.compose.material.icons.rounded.Android
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Extension
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material.icons.rounded.Widgets
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.anatdx.nemuri.BuildConfig
 import com.anatdx.nemuri.R
+import com.anatdx.nemuri.data.runtime.BackgroundAppSnapshot
+import com.anatdx.nemuri.data.runtime.BackgroundProcessResult
+import com.anatdx.nemuri.data.runtime.FrameworkRuntimeClient
 import com.anatdx.nemuri.data.runtime.RuntimeStats
-import com.anatdx.nemuri.data.runtime.RuntimeStatsRepository
 import com.anatdx.nemuri.ui.common.NemuriMotion
 import com.anatdx.nemuri.xposed.ModuleStatus
 import com.anatdx.nemuri.xposed.XposedServiceStatus
+import kotlinx.coroutines.launch
 
 @Composable
 fun HomePage(innerPadding: PaddingValues) {
+    val context = LocalContext.current
     val status = XposedServiceStatus.state.value
-    val runtimeStats = remember { RuntimeStatsRepository.load() }
+    var backgroundResult by remember { mutableStateOf<BackgroundProcessResult?>(null) }
+    var loadingBackground by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val backgroundApps = when (val result = backgroundResult) {
+        is BackgroundProcessResult.Success -> result.apps
+        else -> emptyList()
+    }
+    val runtimeStats = RuntimeStats(
+        frozenBackgroundApps = 0,
+        totalBackgroundApps = backgroundApps.size
+    )
     val deviceName = remember {
         listOf(Build.MANUFACTURER, Build.MODEL)
             .filter { it.isNotBlank() }
             .joinToString(" ")
             .ifBlank { Build.DEVICE }
+    }
+
+    suspend fun refreshBackgroundProcesses() {
+        loadingBackground = true
+        backgroundResult = FrameworkRuntimeClient.getBackgroundProcesses(context)
+        loadingBackground = false
+    }
+
+    LaunchedEffect(status.active) {
+        if (status.active) {
+            refreshBackgroundProcesses()
+        }
     }
 
     LazyColumn(
@@ -70,6 +105,18 @@ fun HomePage(innerPadding: PaddingValues) {
                 status = status,
                 runtimeStats = runtimeStats,
                 deviceName = deviceName
+            )
+        }
+        item {
+            BackgroundProcessCard(
+                result = backgroundResult,
+                apps = backgroundApps,
+                loading = loadingBackground,
+                onRefresh = {
+                    scope.launch {
+                        refreshBackgroundProcesses()
+                    }
+                }
             )
         }
     }
@@ -228,5 +275,124 @@ private fun SystemInfoItem(
                 style = MaterialTheme.typography.bodyLarge
             )
         }
+    }
+}
+
+@Composable
+private fun BackgroundProcessCard(
+    result: BackgroundProcessResult?,
+    apps: List<BackgroundAppSnapshot>,
+    loading: Boolean,
+    onRefresh: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(animationSpec = tween(NemuriMotion.Medium)),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.background_process_snapshot_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = stringResource(R.string.background_process_snapshot_count, apps.size),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Button(onClick = onRefresh, enabled = !loading) {
+                    if (loading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = stringResource(R.string.background_process_snapshot_refresh),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+
+            when (result) {
+                is BackgroundProcessResult.Success -> {
+                    if (apps.isEmpty()) {
+                        Text(
+                            text = stringResource(R.string.background_process_snapshot_empty),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            apps.take(6).forEach { app ->
+                                BackgroundAppItem(app = app)
+                            }
+                        }
+                    }
+                }
+
+                is BackgroundProcessResult.Failure -> {
+                    Text(
+                        text = stringResource(
+                            R.string.background_process_snapshot_error,
+                            result.message
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+
+                null -> {
+                    Text(
+                        text = stringResource(R.string.background_process_snapshot_waiting),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BackgroundAppItem(app: BackgroundAppSnapshot) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = app.packageName,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = stringResource(
+                R.string.background_process_snapshot_detail,
+                app.uid,
+                app.processes.size,
+                app.aggregateProcState
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }

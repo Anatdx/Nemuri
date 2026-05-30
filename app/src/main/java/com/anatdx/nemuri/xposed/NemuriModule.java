@@ -8,6 +8,8 @@ import java.lang.reflect.Method;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import com.anatdx.nemuri.xposed.bridge.SystemServerRuntimeBridge;
+
 import io.github.libxposed.api.XposedModule;
 import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.XposedModuleInterface;
@@ -15,6 +17,7 @@ import io.github.libxposed.api.XposedModuleInterface;
 public final class NemuriModule extends XposedModule {
     private static final String TAG = "Nemuri";
     private final ConcurrentHashMap<String, AtomicInteger> hookHitCounters = new ConcurrentHashMap<>();
+    private volatile SystemServerRuntimeBridge runtimeBridge;
 
     @Override
     public void onModuleLoaded(@NonNull XposedModuleInterface.ModuleLoadedParam param) {
@@ -51,6 +54,9 @@ public final class NemuriModule extends XposedModule {
     }
 
     private void installSystemServerHooks(@NonNull ClassLoader classLoader) {
+        runtimeBridge = new SystemServerRuntimeBridge(this, classLoader);
+        hookActivityManagerServiceCapture(classLoader);
+        hookRuntimeBinderPublish(classLoader);
         hookMethods(
                 classLoader,
                 "com.android.server.am.ActivityManagerService",
@@ -78,6 +84,64 @@ public final class NemuriModule extends XposedModule {
                 "moveTaskToBack",
                 "removeTask"
         );
+    }
+
+    private void hookActivityManagerServiceCapture(@NonNull ClassLoader classLoader) {
+        Class<?> targetClass;
+        try {
+            targetClass = Class.forName("com.android.server.am.ActivityManagerService", false, classLoader);
+        } catch (Throwable tr) {
+            log(Log.WARN, TAG, "Framework hook target missing: com.android.server.am.ActivityManagerService");
+            return;
+        }
+
+        int installed = 0;
+        for (Method method : targetClass.getDeclaredMethods()) {
+            if (!"setSystemProcess".equals(method.getName())) {
+                continue;
+            }
+            try {
+                method.setAccessible(true);
+                hook(method).intercept(new ActivityManagerCaptureHooker());
+                installed++;
+            } catch (Throwable tr) {
+                log(Log.ERROR, TAG, "Failed to hook ActivityManagerService#setSystemProcess", tr);
+            }
+        }
+        if (installed > 0) {
+            log(Log.INFO, TAG, "Hook installed: ActivityManagerService#setSystemProcess (" + installed + " overloads)");
+        }
+    }
+
+    private void hookRuntimeBinderPublish(@NonNull ClassLoader classLoader) {
+        Class<?> targetClass;
+        try {
+            targetClass = Class.forName("com.android.server.am.ActivityManagerService", false, classLoader);
+        } catch (Throwable tr) {
+            log(Log.WARN, TAG, "Framework hook target missing: com.android.server.am.ActivityManagerService");
+            return;
+        }
+
+        // setSystemProcess captures AMS too early to broadcast; publish once the system is
+        // ready. Both hooks are guarded by the bridge so only the first one actually publishes.
+        for (String methodName : new String[]{"systemReady", "finishBooting"}) {
+            int installed = 0;
+            for (Method method : targetClass.getDeclaredMethods()) {
+                if (!methodName.equals(method.getName())) {
+                    continue;
+                }
+                try {
+                    method.setAccessible(true);
+                    hook(method).intercept(new RuntimeBinderPublishHooker());
+                    installed++;
+                } catch (Throwable tr) {
+                    log(Log.ERROR, TAG, "Failed to hook ActivityManagerService#" + methodName + " for Binder publish", tr);
+                }
+            }
+            if (installed > 0) {
+                log(Log.INFO, TAG, "Hook installed for runtime Binder publish: ActivityManagerService#" + methodName + " (" + installed + " overloads)");
+            }
+        }
     }
 
     private void hookMethods(
@@ -151,4 +215,29 @@ public final class NemuriModule extends XposedModule {
             return chain.proceed();
         }
     }
+
+    private final class ActivityManagerCaptureHooker implements XposedInterface.Hooker {
+        @Override
+        public Object intercept(@NonNull XposedInterface.Chain chain) throws Throwable {
+            Object result = chain.proceed();
+            SystemServerRuntimeBridge bridge = runtimeBridge;
+            if (bridge != null && chain.getThisObject() != null) {
+                bridge.captureActivityManagerService(chain.getThisObject());
+            }
+            return result;
+        }
+    }
+
+    private final class RuntimeBinderPublishHooker implements XposedInterface.Hooker {
+        @Override
+        public Object intercept(@NonNull XposedInterface.Chain chain) throws Throwable {
+            Object result = chain.proceed();
+            SystemServerRuntimeBridge bridge = runtimeBridge;
+            if (bridge != null) {
+                bridge.publishRuntimeBinder();
+            }
+            return result;
+        }
+    }
+
 }

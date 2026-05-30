@@ -14,6 +14,13 @@
     <string name="device_title">设备</string>
     <string name="background_freeze_title">后台冻结</string>
     <string name="background_freeze_count_format">%1$d / %2$d</string>
+    <string name="background_process_snapshot_title">后台进程快照</string>
+    <string name="background_process_snapshot_count">%1$d 个后台 app</string>
+    <string name="background_process_snapshot_waiting">等待 system_server 桥接服务。</string>
+    <string name="background_process_snapshot_empty">system_server 暂未报告后台应用。</string>
+    <string name="background_process_snapshot_error">桥接错误：%1$s</string>
+    <string name="background_process_snapshot_detail">uid %1$d · %2$d 个进程 · 状态 %3$d</string>
+    <string name="background_process_snapshot_refresh">刷新后台快照</string>
     <string name="module_status_active">模块已激活</string>
     <string name="module_status_inactive">模块未激活</string>
     <string name="module_status_active_description">已连接到 %1$s，Nemuri 可以通过 libxposed service 读取框架状态。</string>
