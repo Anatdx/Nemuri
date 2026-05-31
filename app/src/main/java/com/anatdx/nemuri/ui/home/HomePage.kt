@@ -1,3 +1,12 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Nemuri - Home screen: module status, system info, and the background-app monitor.
+ *
+ * License: Apache-2.0
+ *
+ * Author: Anatdx
+ */
+
 package com.anatdx.nemuri.ui.home
 
 import android.graphics.Bitmap

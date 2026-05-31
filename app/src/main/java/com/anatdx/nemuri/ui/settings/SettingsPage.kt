@@ -1,3 +1,12 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Nemuri - Settings screen (placeholder controls for the future freeze engine).
+ *
+ * License: Apache-2.0
+ *
+ * Author: Anatdx
+ */
+
 package com.anatdx.nemuri.ui.settings
 
 import androidx.compose.animation.animateContentSize

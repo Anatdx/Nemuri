@@ -1,3 +1,12 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Nemuri - View model that preloads the installed-app list and exposes app policies.
+ *
+ * License: Apache-2.0
+ *
+ * Author: Anatdx
+ */
+
 package com.anatdx.nemuri.viewmodel
 
 import android.app.Application

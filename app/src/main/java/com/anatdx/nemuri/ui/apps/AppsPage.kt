@@ -1,3 +1,12 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Nemuri - App list screen and per-app policy detail page.
+ *
+ * License: Apache-2.0
+ *
+ * Author: Anatdx
+ */
+
 package com.anatdx.nemuri.ui.apps
 
 import androidx.activity.compose.BackHandler

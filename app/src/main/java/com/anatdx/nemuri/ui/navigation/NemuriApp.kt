@@ -1,3 +1,12 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Nemuri - Top-level scaffold with bottom-navigation between pages.
+ *
+ * License: Apache-2.0
+ *
+ * Author: Anatdx
+ */
+
 package com.anatdx.nemuri.ui.navigation
 
 import androidx.activity.compose.BackHandler

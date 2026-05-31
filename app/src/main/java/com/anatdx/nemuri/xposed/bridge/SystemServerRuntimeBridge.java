@@ -1,3 +1,12 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Nemuri - system_server-side bridge: serves background-app snapshots to the manager over Binder.
+ *
+ * License: Apache-2.0
+ *
+ * Author: Anatdx
+ */
+
 package com.anatdx.nemuri.xposed.bridge;
 
 import android.content.Context;

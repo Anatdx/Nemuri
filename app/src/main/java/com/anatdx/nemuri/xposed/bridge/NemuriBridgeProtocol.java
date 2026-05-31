@@ -1,3 +1,12 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Nemuri - Shared constants for the manager <-> system_server Binder protocol.
+ *
+ * License: Apache-2.0
+ *
+ * Author: Anatdx
+ */
+
 package com.anatdx.nemuri.xposed.bridge;
 
 public final class NemuriBridgeProtocol {
