@@ -10,6 +10,20 @@ public final class NemuriBridgeProtocol {
     public static final int REPLY_SUCCESS = 0;
     public static final int REPLY_FAILURE = -1;
 
+    // Observation layer: per-app exemption flags (bitmask). Empty mask => would be frozen.
+    // Detection only; nothing here changes freeze state.
+    public static final int EXEMPT_NONE = 0;
+    public static final int EXEMPT_SELF = 1;
+    public static final int EXEMPT_SYSTEM = 1 << 1;
+    public static final int EXEMPT_XPOSED_MODULE = 1 << 2;
+    public static final int EXEMPT_INPUT_METHOD = 1 << 3;
+    public static final int EXEMPT_LAUNCHER = 1 << 4;
+    public static final int EXEMPT_ACCESSIBILITY = 1 << 5;
+    public static final int EXEMPT_AUDIO = 1 << 6;
+    public static final int EXEMPT_MICROPHONE = 1 << 7;
+    public static final int EXEMPT_VPN = 1 << 8;
+    public static final int EXEMPT_LOCATION = 1 << 9;
+
     private NemuriBridgeProtocol() {
     }
 }

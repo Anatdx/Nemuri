@@ -57,6 +57,7 @@ public final class NemuriModule extends XposedModule {
         runtimeBridge = new SystemServerRuntimeBridge(this, classLoader);
         hookActivityManagerServiceCapture(classLoader);
         hookRuntimeBinderPublish(classLoader);
+        hookVpnState(classLoader);
         hookMethods(
                 classLoader,
                 "com.android.server.am.ActivityManagerService",
@@ -141,6 +142,33 @@ public final class NemuriModule extends XposedModule {
             if (installed > 0) {
                 log(Log.INFO, TAG, "Hook installed for runtime Binder publish: ActivityManagerService#" + methodName + " (" + installed + " overloads)");
             }
+        }
+    }
+
+    private void hookVpnState(@NonNull ClassLoader classLoader) {
+        Class<?> targetClass;
+        try {
+            targetClass = Class.forName("com.android.server.connectivity.Vpn", false, classLoader);
+        } catch (Throwable tr) {
+            log(Log.WARN, TAG, "Framework hook target missing: com.android.server.connectivity.Vpn");
+            return;
+        }
+
+        int installed = 0;
+        for (Method method : targetClass.getDeclaredMethods()) {
+            if (!"updateState".equals(method.getName())) {
+                continue;
+            }
+            try {
+                method.setAccessible(true);
+                hook(method).intercept(new VpnStateHooker());
+                installed++;
+            } catch (Throwable tr) {
+                log(Log.ERROR, TAG, "Failed to hook Vpn#updateState", tr);
+            }
+        }
+        if (installed > 0) {
+            log(Log.INFO, TAG, "Hook installed: Vpn#updateState (" + installed + " overloads)");
         }
     }
 
@@ -238,6 +266,45 @@ public final class NemuriModule extends XposedModule {
             }
             return result;
         }
+    }
+
+    private final class VpnStateHooker implements XposedInterface.Hooker {
+        @Override
+        public Object intercept(@NonNull XposedInterface.Chain chain) throws Throwable {
+            Object result = chain.proceed();
+            try {
+                SystemServerRuntimeBridge bridge = runtimeBridge;
+                Object vpn = chain.getThisObject();
+                if (bridge != null && vpn != null && !chain.getArgs().isEmpty()) {
+                    String state = String.valueOf(chain.getArg(0));
+                    int ownerUid = readVpnOwnerUid(vpn);
+                    if ("CONNECTED".equals(state)) {
+                        bridge.onVpnStateChanged(ownerUid, true);
+                    } else if ("DISCONNECTED".equals(state) || "FAILED".equals(state)) {
+                        bridge.onVpnStateChanged(ownerUid, false);
+                    }
+                }
+            } catch (Throwable throwable) {
+                log(Log.WARN, TAG, "Vpn#updateState hook failed", throwable);
+            }
+            return result;
+        }
+    }
+
+    private int readVpnOwnerUid(@NonNull Object vpn) {
+        Class<?> current = vpn.getClass();
+        while (current != null) {
+            try {
+                java.lang.reflect.Field field = current.getDeclaredField("mOwnerUID");
+                field.setAccessible(true);
+                return field.getInt(vpn);
+            } catch (NoSuchFieldException ignored) {
+                current = current.getSuperclass();
+            } catch (Throwable throwable) {
+                return -1;
+            }
+        }
+        return -1;
     }
 
 }

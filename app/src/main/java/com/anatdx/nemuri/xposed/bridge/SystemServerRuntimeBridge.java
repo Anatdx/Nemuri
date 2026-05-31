@@ -19,6 +19,8 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import io.github.libxposed.api.XposedInterface;
@@ -34,6 +36,8 @@ public final class SystemServerRuntimeBridge {
     private final ClassLoader classLoader;
     private final AtomicBoolean binderPublished = new AtomicBoolean(false);
     private final RuntimeBinder runtimeBinder = new RuntimeBinder();
+    private final AppExemptionDetector exemptionDetector;
+    private final Set<Integer> vpnUids = ConcurrentHashMap.newKeySet();
 
     private volatile Object activityManagerService;
     private volatile Object mLruProcesses;
@@ -51,6 +55,7 @@ public final class SystemServerRuntimeBridge {
     ) {
         this.xposed = xposed;
         this.classLoader = classLoader;
+        this.exemptionDetector = new AppExemptionDetector(xposed);
     }
 
     public void captureActivityManagerService(@NonNull Object instance) {
@@ -62,6 +67,18 @@ public final class SystemServerRuntimeBridge {
         // during startBootstrapServices, long before AMS#mProcessesReady, so calling
         // sendStickyBroadcast here throws "Cannot broadcast before boot completed".
         // NemuriModule drives publishRuntimeBinder() from a post-boot AMS hook instead.
+    }
+
+    /** Updated by NemuriModule's Vpn#updateState hook; consumed by the exemption detector. */
+    public void onVpnStateChanged(int uid, boolean connected) {
+        if (uid <= 0) {
+            return;
+        }
+        if (connected) {
+            vpnUids.add(uid);
+        } else {
+            vpnUids.remove(uid);
+        }
     }
 
     private Context readContext(@NonNull Object instance) {
@@ -328,12 +345,19 @@ public final class SystemServerRuntimeBridge {
             }
 
             List<BackgroundApp> apps = collectBackgroundApps();
+            Context context = systemContext;
+            AppExemptionDetector.Snapshot exemptionSnapshot =
+                    context == null ? null : exemptionDetector.snapshot(context, vpnUids);
             reply.writeNoException();
             reply.writeInt(apps.size());
             for (BackgroundApp app : apps) {
+                int exemptionFlags = (context != null && exemptionSnapshot != null)
+                        ? exemptionDetector.flagsFor(context, app.packageName, app.uid, exemptionSnapshot)
+                        : NemuriBridgeProtocol.EXEMPT_NONE;
                 reply.writeString(app.packageName);
                 reply.writeInt(app.uid);
                 reply.writeInt(app.aggregateProcState());
+                reply.writeInt(exemptionFlags);
                 reply.writeInt(app.processes.size());
                 for (RunningProcessSnapshot process : app.processes) {
                     reply.writeString(process.processName);

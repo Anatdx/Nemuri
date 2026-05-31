@@ -21,6 +21,7 @@ data class BackgroundAppSnapshot(
     val packageName: String,
     val uid: Int,
     val aggregateProcState: Int,
+    val exemptionFlags: Int,
     val processes: List<BackgroundProcessDetail>,
 )
 
@@ -54,6 +55,7 @@ object FrameworkRuntimeClient {
                         val packageName = reply.readString().orEmpty()
                         val uid = reply.readInt()
                         val aggregateProcState = reply.readInt()
+                        val exemptionFlags = reply.readInt()
                         val processCount = reply.readInt().coerceAtLeast(0)
                         val processes = buildList(processCount) {
                             repeat(processCount) {
@@ -71,6 +73,7 @@ object FrameworkRuntimeClient {
                                 packageName = packageName,
                                 uid = uid,
                                 aggregateProcState = aggregateProcState,
+                                exemptionFlags = exemptionFlags,
                                 processes = processes,
                             )
                         )

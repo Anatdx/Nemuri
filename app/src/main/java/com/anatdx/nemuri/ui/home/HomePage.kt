@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -34,7 +36,9 @@ import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material.icons.rounded.Widgets
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -70,6 +74,7 @@ import com.anatdx.nemuri.ui.common.NemuriMotion
 import com.anatdx.nemuri.ui.components.PressableSurface
 import com.anatdx.nemuri.viewmodel.AppsViewModel
 import com.anatdx.nemuri.xposed.ModuleStatus
+import com.anatdx.nemuri.xposed.bridge.NemuriBridgeProtocol
 import com.anatdx.nemuri.xposed.XposedServiceStatus
 import kotlinx.coroutines.launch
 
@@ -87,6 +92,7 @@ fun HomePage(
     var backgroundResult by remember { mutableStateOf<BackgroundProcessResult?>(null) }
     var loadingBackground by remember { mutableStateOf(false) }
     var selectedPackage by rememberSaveable { mutableStateOf<String?>(null) }
+    var showSystemApps by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val backgroundApps = when (val result = backgroundResult) {
         is BackgroundProcessResult.Success -> result.apps
@@ -168,6 +174,8 @@ fun HomePage(
                 backgroundApps = backgroundApps,
                 appInfoByPackage = appInfoByPackage,
                 loading = loadingBackground,
+                showSystemApps = showSystemApps,
+                onToggleSystemApps = { showSystemApps = !showSystemApps },
                 onRefresh = { scope.launch { refreshBackgroundProcesses() } },
                 onAppClick = { selectedPackage = it }
             )
@@ -185,9 +193,16 @@ private fun HomeContent(
     backgroundApps: List<BackgroundAppSnapshot>,
     appInfoByPackage: Map<String, InstalledAppInfo>,
     loading: Boolean,
+    showSystemApps: Boolean,
+    onToggleSystemApps: () -> Unit,
     onRefresh: () -> Unit,
     onAppClick: (String) -> Unit,
 ) {
+    val visibleApps = if (showSystemApps) {
+        backgroundApps
+    } else {
+        backgroundApps.filter { (it.exemptionFlags and NemuriBridgeProtocol.EXEMPT_SYSTEM) == 0 }
+    }
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -206,14 +221,60 @@ private fun HomeContent(
             )
         }
         item {
-            BackgroundProcessCard(
-                result = backgroundResult,
-                apps = backgroundApps,
-                appInfoByPackage = appInfoByPackage,
+            BackgroundMonitorHeader(
+                count = visibleApps.size,
+                showSystemApps = showSystemApps,
                 loading = loading,
-                onRefresh = onRefresh,
-                onAppClick = onAppClick
+                onToggleSystemApps = onToggleSystemApps,
+                onRefresh = onRefresh
             )
+        }
+        when (backgroundResult) {
+            is BackgroundProcessResult.Success -> {
+                if (visibleApps.isEmpty()) {
+                    item {
+                        Text(
+                            text = stringResource(R.string.background_process_snapshot_empty),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    items(
+                        items = visibleApps,
+                        key = { it.packageName }
+                    ) { app ->
+                        BackgroundAppRow(
+                            app = app,
+                            info = appInfoByPackage[app.packageName],
+                            onClick = { onAppClick(app.packageName) }
+                        )
+                    }
+                }
+            }
+
+            is BackgroundProcessResult.Failure -> {
+                item {
+                    Text(
+                        text = stringResource(
+                            R.string.background_process_snapshot_error,
+                            backgroundResult.message
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+
+            null -> {
+                item {
+                    Text(
+                        text = stringResource(R.string.background_process_snapshot_waiting),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
     }
 }
@@ -375,100 +436,52 @@ private fun SystemInfoItem(
 }
 
 @Composable
-private fun BackgroundProcessCard(
-    result: BackgroundProcessResult?,
-    apps: List<BackgroundAppSnapshot>,
-    appInfoByPackage: Map<String, InstalledAppInfo>,
+private fun BackgroundMonitorHeader(
+    count: Int,
+    showSystemApps: Boolean,
     loading: Boolean,
+    onToggleSystemApps: () -> Unit,
     onRefresh: () -> Unit,
-    onAppClick: (String) -> Unit,
 ) {
-    Surface(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .animateContentSize(animationSpec = tween(NemuriMotion.Medium)),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        shape = RoundedCornerShape(8.dp)
+            .padding(top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(3.dp)
-                ) {
-                    Text(
-                        text = stringResource(R.string.background_process_snapshot_title),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = stringResource(R.string.background_process_snapshot_count, apps.size),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Button(onClick = onRefresh, enabled = !loading) {
-                    if (loading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Rounded.Refresh,
-                            contentDescription = stringResource(R.string.background_process_snapshot_refresh),
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
-            }
-
-            when (result) {
-                is BackgroundProcessResult.Success -> {
-                    if (apps.isEmpty()) {
-                        Text(
-                            text = stringResource(R.string.background_process_snapshot_empty),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } else {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            apps.take(8).forEach { app ->
-                                BackgroundAppRow(
-                                    app = app,
-                                    info = appInfoByPackage[app.packageName],
-                                    onClick = { onAppClick(app.packageName) }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                is BackgroundProcessResult.Failure -> {
-                    Text(
-                        text = stringResource(
-                            R.string.background_process_snapshot_error,
-                            result.message
-                        ),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-
-                null -> {
-                    Text(
-                        text = stringResource(R.string.background_process_snapshot_waiting),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+            Text(
+                text = stringResource(R.string.background_process_snapshot_title),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = stringResource(R.string.background_process_snapshot_count, count),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        FilterChip(
+            selected = showSystemApps,
+            onClick = onToggleSystemApps,
+            label = { Text(stringResource(R.string.monitor_show_system_apps)) }
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Button(onClick = onRefresh, enabled = !loading) {
+            if (loading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Rounded.Refresh,
+                    contentDescription = stringResource(R.string.background_process_snapshot_refresh),
+                    modifier = Modifier.size(18.dp)
+                )
             }
         }
     }
@@ -517,6 +530,8 @@ private fun BackgroundAppRow(
                     overflow = TextOverflow.Ellipsis
                 )
             }
+            Spacer(modifier = Modifier.width(10.dp))
+            FreezeVerdictLabel(exempt = app.exemptionFlags != NemuriBridgeProtocol.EXEMPT_NONE)
         }
     }
 }
@@ -536,6 +551,9 @@ private fun BackgroundAppDetailPage(
     ) {
         item {
             BackgroundAppDetailHeader(app = app, info = info)
+        }
+        item {
+            ExemptionVerdictSection(flags = app.exemptionFlags)
         }
         item {
             Text(
@@ -665,3 +683,84 @@ private fun AppBitmapIcon(
         )
     }
 }
+
+@Composable
+private fun FreezeVerdictLabel(exempt: Boolean) {
+    Text(
+        text = stringResource(
+            if (exempt) R.string.freeze_verdict_exempt else R.string.freeze_verdict_would_freeze
+        ),
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.Medium,
+        color = if (exempt) {
+            MaterialTheme.colorScheme.secondary
+        } else {
+            MaterialTheme.colorScheme.primary
+        }
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ExemptionVerdictSection(flags: Int) {
+    val exempt = flags != NemuriBridgeProtocol.EXEMPT_NONE
+    val reasons = exemptionReasonResIds(flags)
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = stringResource(R.string.freeze_verdict_title),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                text = stringResource(
+                    if (exempt) R.string.freeze_verdict_exempt else R.string.freeze_verdict_would_freeze
+                ),
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = if (exempt) {
+                    MaterialTheme.colorScheme.secondary
+                } else {
+                    MaterialTheme.colorScheme.primary
+                }
+            )
+            if (reasons.isNotEmpty()) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    reasons.forEach { labelRes ->
+                        AssistChip(
+                            onClick = {},
+                            label = { Text(stringResource(labelRes)) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private val EXEMPTION_REASON_LABELS: List<Pair<Int, Int>> = listOf(
+    NemuriBridgeProtocol.EXEMPT_SELF to R.string.exempt_self,
+    NemuriBridgeProtocol.EXEMPT_SYSTEM to R.string.exempt_system,
+    NemuriBridgeProtocol.EXEMPT_XPOSED_MODULE to R.string.exempt_xposed,
+    NemuriBridgeProtocol.EXEMPT_INPUT_METHOD to R.string.exempt_ime,
+    NemuriBridgeProtocol.EXEMPT_LAUNCHER to R.string.exempt_launcher,
+    NemuriBridgeProtocol.EXEMPT_ACCESSIBILITY to R.string.exempt_accessibility,
+    NemuriBridgeProtocol.EXEMPT_AUDIO to R.string.exempt_audio,
+    NemuriBridgeProtocol.EXEMPT_MICROPHONE to R.string.exempt_microphone,
+    NemuriBridgeProtocol.EXEMPT_VPN to R.string.exempt_vpn,
+    NemuriBridgeProtocol.EXEMPT_LOCATION to R.string.exempt_location,
+)
+
+private fun exemptionReasonResIds(flags: Int): List<Int> =
+    EXEMPTION_REASON_LABELS.filter { (bit, _) -> flags and bit != 0 }.map { it.second }
