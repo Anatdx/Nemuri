@@ -25,6 +25,7 @@ import androidx.annotation.NonNull;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,7 +37,9 @@ import io.github.libxposed.api.XposedInterface;
 
 public final class SystemServerRuntimeBridge {
     private static final String TAG = "Nemuri";
-    private static final int FOREGROUND_PROC_STATE_MAX = 6;
+    // procState <= this = user-visible (TOP/BOUND_TOP); such apps are foreground, not monitor
+    // targets. Foreground-service apps (e.g. background media) are above this and stay listed.
+    private static final int VISIBLE_PROC_STATE_MAX = 3;
     private static final int PER_USER_RANGE = 100000;
     private static final int FIRST_APPLICATION_UID = 10000;
     private static final int LAST_APPLICATION_UID = 19999;
@@ -161,9 +164,11 @@ public final class SystemServerRuntimeBridge {
             records = new ArrayList<>(lruProcesses);
         }
 
-        // Group background processes by package so each app is a single entry instead of
-        // one row per process (e.g. com.tencent.mm and com.tencent.mm:push collapse into one).
+        // Group each app's non-visible processes by package. Any app with a user-visible process
+        // is the foreground app and is dropped entirely; this keeps background media etc., which
+        // run as foreground-service rather than as a visible process.
         Map<String, BackgroundApp> apps = new LinkedHashMap<>();
+        Set<String> visiblePackages = new HashSet<>();
         for (int index = records.size() - 1; index >= 0; index--) {
             Object record = records.get(index);
             if (record == null) {
@@ -173,15 +178,20 @@ public final class SystemServerRuntimeBridge {
             if (snapshot == null
                     || !isApplicationUid(snapshot.uid)
                     || snapshot.packageName == null
-                    || snapshot.packageName.isBlank()
-                    || snapshot.procState <= FOREGROUND_PROC_STATE_MAX) {
+                    || snapshot.packageName.isBlank()) {
                 continue;
             }
-            BackgroundApp app = apps.computeIfAbsent(
+            if (snapshot.procState <= VISIBLE_PROC_STATE_MAX) {
+                visiblePackages.add(snapshot.packageName);
+                continue;
+            }
+            apps.computeIfAbsent(
                     snapshot.packageName,
                     ignored -> new BackgroundApp(snapshot.packageName, snapshot.uid)
-            );
-            app.add(snapshot);
+            ).add(snapshot);
+        }
+        for (String visiblePackage : visiblePackages) {
+            apps.remove(visiblePackage);
         }
         return new ArrayList<>(apps.values());
     }
@@ -357,39 +367,47 @@ public final class SystemServerRuntimeBridge {
                 throw new SecurityException("Caller is not allowed to use Nemuri runtime bridge");
             }
 
-            if (code == NemuriBridgeProtocol.TRANSACTION_SET_FROZEN) {
-                int targetUid = data.readInt();
-                boolean frozen = data.readInt() != 0;
-                // Never let the manager freeze itself (target == caller).
-                boolean ok = targetUid != callingUid && freezeController.setFrozen(targetUid, frozen);
-                reply.writeNoException();
-                reply.writeInt(ok ? NemuriBridgeProtocol.REPLY_SUCCESS : NemuriBridgeProtocol.REPLY_FAILURE);
-                return true;
-            }
-
-            List<BackgroundApp> apps = collectBackgroundApps();
-            Context context = systemContext;
-            AppExemptionDetector.Snapshot exemptionSnapshot =
-                    context == null ? null : exemptionDetector.snapshot(context, vpnUids);
-            reply.writeNoException();
-            reply.writeInt(apps.size());
-            for (BackgroundApp app : apps) {
-                int exemptionFlags = (context != null && exemptionSnapshot != null)
-                        ? exemptionDetector.flagsFor(context, app.packageName, app.uid, exemptionSnapshot)
-                        : NemuriBridgeProtocol.EXEMPT_NONE;
-                reply.writeString(app.packageName);
-                reply.writeInt(app.uid);
-                reply.writeInt(app.aggregateProcState());
-                reply.writeInt(exemptionFlags);
-                reply.writeInt(freezeController.isFrozen(app.uid) ? 1 : 0);
-                reply.writeInt(app.processes.size());
-                for (RunningProcessSnapshot process : app.processes) {
-                    reply.writeString(process.processName);
-                    reply.writeInt(process.pid);
-                    reply.writeInt(process.procState);
+            // Inside a transaction the calling identity is the manager app; clear it so privileged
+            // queries (e.g. AudioManager active-playback uids) run as system_server instead of
+            // coming back anonymized.
+            long identityToken = Binder.clearCallingIdentity();
+            try {
+                if (code == NemuriBridgeProtocol.TRANSACTION_SET_FROZEN) {
+                    int targetUid = data.readInt();
+                    boolean frozen = data.readInt() != 0;
+                    // Never let the manager freeze itself (target == caller).
+                    boolean ok = targetUid != callingUid && freezeController.setFrozen(targetUid, frozen);
+                    reply.writeNoException();
+                    reply.writeInt(ok ? NemuriBridgeProtocol.REPLY_SUCCESS : NemuriBridgeProtocol.REPLY_FAILURE);
+                    return true;
                 }
+
+                List<BackgroundApp> apps = collectBackgroundApps();
+                Context context = systemContext;
+                AppExemptionDetector.Snapshot exemptionSnapshot =
+                        context == null ? null : exemptionDetector.snapshot(context, vpnUids);
+                reply.writeNoException();
+                reply.writeInt(apps.size());
+                for (BackgroundApp app : apps) {
+                    int exemptionFlags = (context != null && exemptionSnapshot != null)
+                            ? exemptionDetector.flagsFor(context, app.packageName, app.uid, exemptionSnapshot)
+                            : NemuriBridgeProtocol.EXEMPT_NONE;
+                    reply.writeString(app.packageName);
+                    reply.writeInt(app.uid);
+                    reply.writeInt(app.aggregateProcState());
+                    reply.writeInt(exemptionFlags);
+                    reply.writeInt(freezeController.isFrozen(app.uid) ? 1 : 0);
+                    reply.writeInt(app.processes.size());
+                    for (RunningProcessSnapshot process : app.processes) {
+                        reply.writeString(process.processName);
+                        reply.writeInt(process.pid);
+                        reply.writeInt(process.procState);
+                    }
+                }
+                return true;
+            } finally {
+                Binder.restoreCallingIdentity(identityToken);
             }
-            return true;
         }
     }
 

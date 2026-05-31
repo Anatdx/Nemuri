@@ -16,6 +16,8 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.media.AudioManager;
+import android.media.AudioPlaybackConfiguration;
+import android.media.AudioRecordingConfiguration;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.text.TextUtils;
@@ -26,7 +28,6 @@ import androidx.annotation.NonNull;
 import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -36,6 +37,7 @@ import io.github.libxposed.api.XposedInterface;
 // NemuriBridgeProtocol EXEMPT_* bitmask. Detection only -- never freezes. Location not wired yet.
 final class AppExemptionDetector {
     private static final String TAG = "Nemuri";
+    private static final int PLAYER_STATE_STARTED = 2; // AudioPlaybackConfiguration.PLAYER_STATE_STARTED (@SystemApi)
 
     private final XposedInterface xposed;
     private final ConcurrentHashMap<String, Integer> packageFlagCache = new ConcurrentHashMap<>();
@@ -73,8 +75,8 @@ final class AppExemptionDetector {
     @NonNull
     Snapshot snapshot(@NonNull Context context, @NonNull Set<Integer> vpnUids) {
         return new Snapshot(
-                activeAudioUids(context, "getActivePlaybackConfigurations"),
-                activeAudioUids(context, "getActiveRecordingConfigurations"),
+                activePlaybackUids(context),
+                activeRecordingUids(context),
                 new HashSet<>(vpnUids),
                 defaultInputMethodPackage(context),
                 currentLauncherPackage(context),
@@ -137,35 +139,54 @@ final class AppExemptionDetector {
         return meta != null && (meta.containsKey("xposedmodule") || meta.containsKey("xposedminversion"));
     }
 
-    private Set<Integer> activeAudioUids(@NonNull Context context, @NonNull String configMethod) {
+    private Set<Integer> activePlaybackUids(@NonNull Context context) {
         Set<Integer> uids = new HashSet<>();
         try {
             AudioManager audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
             if (audioManager == null) {
                 return uids;
             }
-            Method method = AudioManager.class.getMethod(configMethod);
-            Object result = method.invoke(audioManager);
-            if (!(result instanceof List<?>)) {
-                return uids;
-            }
-            for (Object config : (List<?>) result) {
-                Integer uid = reflectClientUid(config);
-                if (uid != null) {
+            for (AudioPlaybackConfiguration config : audioManager.getActivePlaybackConfigurations()) {
+                // Only count players that are actually playing, not idle/paused ones.
+                Integer state = reflectInt(config, "getPlayerState");
+                if (state == null || state != PLAYER_STATE_STARTED) {
+                    continue;
+                }
+                Integer uid = reflectInt(config, "getClientUid");
+                if (uid != null && uid > 0) {
                     uids.add(uid);
                 }
             }
         } catch (Throwable throwable) {
-            xposed.log(Log.WARN, TAG, "Failed to read audio config via " + configMethod, throwable);
+            xposed.log(Log.WARN, TAG, "Failed to read active playback configs", throwable);
         }
         return uids;
     }
 
-    private Integer reflectClientUid(@NonNull Object config) {
+    private Set<Integer> activeRecordingUids(@NonNull Context context) {
+        Set<Integer> uids = new HashSet<>();
         try {
-            Method method = config.getClass().getMethod("getClientUid");
-            method.setAccessible(true);
-            Object value = method.invoke(config);
+            AudioManager audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+            if (audioManager == null) {
+                return uids;
+            }
+            for (AudioRecordingConfiguration config : audioManager.getActiveRecordingConfigurations()) {
+                Integer uid = reflectInt(config, "getClientUid");
+                if (uid != null && uid > 0) {
+                    uids.add(uid);
+                }
+            }
+        } catch (Throwable throwable) {
+            xposed.log(Log.WARN, TAG, "Failed to read active recording configs", throwable);
+        }
+        return uids;
+    }
+
+    private Integer reflectInt(@NonNull Object target, @NonNull String method) {
+        try {
+            Method handle = target.getClass().getMethod(method);
+            handle.setAccessible(true);
+            Object value = handle.invoke(target);
             return value instanceof Integer ? (Integer) value : null;
         } catch (Throwable ignored) {
             return null;
