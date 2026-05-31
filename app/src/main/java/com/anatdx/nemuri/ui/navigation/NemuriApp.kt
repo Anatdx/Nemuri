@@ -55,12 +55,15 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.anatdx.nemuri.R
 import com.anatdx.nemuri.data.apps.InstalledAppInfo
+import com.anatdx.nemuri.data.runtime.FrameworkRuntimeClient
+import com.anatdx.nemuri.data.settings.SettingsStore
 import com.anatdx.nemuri.ui.apps.AppsPage
 import com.anatdx.nemuri.ui.common.NemuriMotion
 import com.anatdx.nemuri.ui.home.HomePage
@@ -75,6 +78,12 @@ fun NemuriApp(appsViewModel: AppsViewModel) {
     var appSearchActive by rememberSaveable { mutableStateOf(false) }
     var appSearchQuery by rememberSaveable { mutableStateOf("") }
     var appsDetailActive by rememberSaveable { mutableStateOf(false) }
+    val context = LocalContext.current
+    val settingsStore = remember { SettingsStore(context) }
+    LaunchedEffect(Unit) {
+        // Sync the saved verbose-logging preference to the system_server module on launch.
+        FrameworkRuntimeClient.setLogEnabled(context, settingsStore.verboseLogging)
+    }
     val selectedPageTitle = stringResource(selectedPage.titleRes)
     val appSearchVisible = selectedPage == NemuriPage.Apps && !appsDetailActive && appSearchActive
 
@@ -213,7 +222,7 @@ fun NemuriApp(appsViewModel: AppsViewModel) {
                     appsViewModel = appsViewModel,
                     onDetailActiveChange = { appsDetailActive = it }
                 )
-                NemuriPage.Settings -> SettingsPage(innerPadding)
+                NemuriPage.Settings -> SettingsPage(innerPadding, appsViewModel, settingsStore)
             }
         }
     }

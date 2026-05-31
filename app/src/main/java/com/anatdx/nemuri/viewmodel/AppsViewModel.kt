@@ -69,4 +69,14 @@ class AppsViewModel(application: Application) : AndroidViewModel(application) {
             policyStore.save(policy)
         }
     }
+
+    suspend fun exportConfig(): String = withContext(Dispatchers.IO) { policyStore.readRawConfig() }
+
+    suspend fun importConfig(json: String): Boolean {
+        val ok = withContext(Dispatchers.IO) { policyStore.writeRawConfig(json) }
+        if (ok) {
+            refresh()
+        }
+        return ok
+    }
 }

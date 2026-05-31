@@ -123,6 +123,27 @@ object FrameworkRuntimeClient {
         }.getOrDefault(false)
     }
 
+    suspend fun setLogEnabled(context: Context, enabled: Boolean): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            val binder = requestRuntimeBinder(context.applicationContext) ?: return@withContext false
+            val data = Parcel.obtain()
+            val reply = Parcel.obtain()
+            try {
+                data.writeInterfaceToken(NemuriBridgeProtocol.DESCRIPTOR)
+                data.writeInt(if (enabled) 1 else 0)
+                val handled = binder.transact(NemuriBridgeProtocol.TRANSACTION_SET_LOG_ENABLED, data, reply, 0)
+                if (!handled) {
+                    return@withContext false
+                }
+                reply.readException()
+                reply.readInt() == NemuriBridgeProtocol.REPLY_SUCCESS
+            } finally {
+                reply.recycle()
+                data.recycle()
+            }
+        }.getOrDefault(false)
+    }
+
     private fun requestRuntimeBinder(context: Context): IBinder? {
         val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             context.registerReceiver(

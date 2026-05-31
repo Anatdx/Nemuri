@@ -17,6 +17,7 @@ import java.lang.reflect.Method;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import com.anatdx.nemuri.xposed.bridge.RuntimeLog;
 import com.anatdx.nemuri.xposed.bridge.SystemServerRuntimeBridge;
 
 import io.github.libxposed.api.XposedModule;
@@ -246,7 +247,7 @@ public final class NemuriModule extends XposedModule {
         public Object intercept(@NonNull XposedInterface.Chain chain) throws Throwable {
             AtomicInteger counter = hookHitCounters.computeIfAbsent(label, ignored -> new AtomicInteger());
             int hit = counter.incrementAndGet();
-            if (hit <= 5) {
+            if (RuntimeLog.verbose && hit <= 5) {
                 log(Log.DEBUG, TAG, "Framework hook hit [" + hit + "]: " + label);
             }
             return chain.proceed();

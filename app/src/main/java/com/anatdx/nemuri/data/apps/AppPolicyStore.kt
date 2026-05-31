@@ -43,6 +43,17 @@ class AppPolicyStore(context: Context) {
         writeAll(policies)
     }
 
+    fun readRawConfig(): String =
+        if (file.exists()) file.readText() else "{\n  \"version\": 1,\n  \"packages\": {}\n}"
+
+    // Validate the JSON has our shape before overwriting, so a bad import can't corrupt the config.
+    fun writeRawConfig(json: String): Boolean = runCatching {
+        val root = JSONObject(json)
+        requireNotNull(root.optJSONObject("packages")) { "missing packages object" }
+        file.writeText(root.toString(2))
+        true
+    }.getOrDefault(false)
+
     private fun writeAll(policies: Map<String, AppPolicy>) {
         val root = JSONObject()
         val packages = JSONObject()

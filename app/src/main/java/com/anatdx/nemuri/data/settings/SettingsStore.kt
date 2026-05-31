@@ -1,0 +1,26 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Nemuri - App-level settings persisted in SharedPreferences.
+ *
+ * License: Apache-2.0
+ *
+ * Author: Anatdx
+ */
+
+package com.anatdx.nemuri.data.settings
+
+import android.content.Context
+
+class SettingsStore(context: Context) {
+    private val prefs = context.applicationContext
+        .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    var verboseLogging: Boolean
+        get() = prefs.getBoolean(KEY_VERBOSE_LOGGING, true)
+        set(value) = prefs.edit().putBoolean(KEY_VERBOSE_LOGGING, value).apply()
+
+    private companion object {
+        const val PREFS_NAME = "nemuri_settings"
+        const val KEY_VERBOSE_LOGGING = "verbose_logging"
+    }
+}

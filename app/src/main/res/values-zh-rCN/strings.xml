@@ -89,11 +89,28 @@
     <string name="config_file_title">配置文件</string>
 
     <string name="settings_title">功能设置</string>
-    <string name="settings_description">先保留设置分区结构，具体策略和开关会在冻结逻辑落地后接入。</string>
+    <string name="settings_description">导入导出配置、控制日志输出、查看应用信息。</string>
     <string name="setting_auto_freeze">自动冻结</string>
     <string name="setting_auto_freeze_description">策略引擎就绪后用于控制后台冻结入口。</string>
     <string name="setting_wake_guard">唤醒保护</string>
     <string name="setting_wake_guard_description">后续用于处理异常唤醒、服务拉起和 Binder 交互。</string>
-    <string name="setting_debug_logs">调试日志</string>
-    <string name="setting_debug_logs_description">当前 hook probe 已写入 LSPosed 日志，后续可在这里控制详细程度。</string>
+    <string name="setting_debug_logs">详细日志输出</string>
+    <string name="setting_debug_logs_description">关闭后减少模块在 LSPosed 的详细日志（错误仍会记录）。</string>
+    <string name="settings_group_config">配置</string>
+    <string name="settings_group_logs">日志</string>
+    <string name="settings_group_about">关于</string>
+    <string name="settings_export_title">导出配置</string>
+    <string name="settings_export_desc">把策略配置保存到文件</string>
+    <string name="settings_import_title">导入配置</string>
+    <string name="settings_import_desc">从文件恢复策略配置</string>
+    <string name="settings_version_title">版本</string>
+    <string name="settings_export_done">配置已导出</string>
+    <string name="settings_import_done">配置已导入</string>
+    <string name="settings_import_failed">导入失败：文件无效</string>
+    <string name="settings_io_failed">操作失败</string>
+    <string name="settings_about_title">关于 Nemuri</string>
+    <string name="settings_about_desc">项目主页与交流群</string>
+    <string name="about_github">GitHub 仓库</string>
+    <string name="about_telegram">Telegram 群组</string>
+    <string name="about_close">关闭</string>
 </resources>

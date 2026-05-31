@@ -17,6 +17,7 @@ public final class NemuriBridgeProtocol {
 
     public static final int TRANSACTION_GET_BACKGROUND_PROCESSES = 1;
     public static final int TRANSACTION_SET_FROZEN = 2;
+    public static final int TRANSACTION_SET_LOG_ENABLED = 3;
     public static final int REPLY_SUCCESS = 0;
     public static final int REPLY_FAILURE = -1;
 

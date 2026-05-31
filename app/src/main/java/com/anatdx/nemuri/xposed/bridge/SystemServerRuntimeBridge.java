@@ -357,7 +357,8 @@ public final class SystemServerRuntimeBridge {
                 return true;
             }
             if (code != NemuriBridgeProtocol.TRANSACTION_GET_BACKGROUND_PROCESSES
-                    && code != NemuriBridgeProtocol.TRANSACTION_SET_FROZEN) {
+                    && code != NemuriBridgeProtocol.TRANSACTION_SET_FROZEN
+                    && code != NemuriBridgeProtocol.TRANSACTION_SET_LOG_ENABLED) {
                 return super.onTransact(code, data, reply, flags);
             }
 
@@ -379,6 +380,13 @@ public final class SystemServerRuntimeBridge {
                     boolean ok = targetUid != callingUid && freezeController.setFrozen(targetUid, frozen);
                     reply.writeNoException();
                     reply.writeInt(ok ? NemuriBridgeProtocol.REPLY_SUCCESS : NemuriBridgeProtocol.REPLY_FAILURE);
+                    return true;
+                }
+
+                if (code == NemuriBridgeProtocol.TRANSACTION_SET_LOG_ENABLED) {
+                    RuntimeLog.verbose = data.readInt() != 0;
+                    reply.writeNoException();
+                    reply.writeInt(NemuriBridgeProtocol.REPLY_SUCCESS);
                     return true;
                 }
 

@@ -89,11 +89,28 @@
     <string name="config_file_title">Config file</string>
 
     <string name="settings_title">Settings</string>
-    <string name="settings_description">The settings structure is in place. Detailed policy switches will be wired in as the freeze engine lands.</string>
+    <string name="settings_description">Import or export config, control logging, and view app info.</string>
     <string name="setting_auto_freeze">Auto freeze</string>
     <string name="setting_auto_freeze_description">Will control the background freeze entry once the policy engine is ready.</string>
     <string name="setting_wake_guard">Wake guard</string>
     <string name="setting_wake_guard_description">Reserved for abnormal wakeups, service starts, and Binder interactions.</string>
-    <string name="setting_debug_logs">Debug logs</string>
-    <string name="setting_debug_logs_description">The current hook probes are written to LSPosed logs. Detailed log controls can live here later.</string>
+    <string name="setting_debug_logs">Verbose logging</string>
+    <string name="setting_debug_logs_description">When off, reduces verbose module logging in LSPosed (errors are still logged).</string>
+    <string name="settings_group_config">Configuration</string>
+    <string name="settings_group_logs">Logs</string>
+    <string name="settings_group_about">About</string>
+    <string name="settings_export_title">Export config</string>
+    <string name="settings_export_desc">Save the policy config to a file</string>
+    <string name="settings_import_title">Import config</string>
+    <string name="settings_import_desc">Restore the policy config from a file</string>
+    <string name="settings_version_title">Version</string>
+    <string name="settings_export_done">Config exported</string>
+    <string name="settings_import_done">Config imported</string>
+    <string name="settings_import_failed">Import failed: invalid file</string>
+    <string name="settings_io_failed">Operation failed</string>
+    <string name="settings_about_title">About Nemuri</string>
+    <string name="settings_about_desc">Project page and chat group</string>
+    <string name="about_github">GitHub repository</string>
+    <string name="about_telegram">Telegram group</string>
+    <string name="about_close">Close</string>
 </resources>

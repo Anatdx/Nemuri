@@ -51,7 +51,9 @@ final class FreezeController {
         }
         try (PrintWriter writer = new PrintWriter(freezePath(uid))) {
             writer.write(frozen ? "1" : "0");
-            xposed.log(Log.INFO, TAG, "cgroup.freeze=" + (frozen ? 1 : 0) + " uid=" + uid);
+            if (RuntimeLog.verbose) {
+                xposed.log(Log.INFO, TAG, "cgroup.freeze=" + (frozen ? 1 : 0) + " uid=" + uid);
+            }
             return true;
         } catch (Throwable throwable) {
             xposed.log(Log.WARN, TAG, "Failed to write cgroup.freeze for uid " + uid, throwable);
