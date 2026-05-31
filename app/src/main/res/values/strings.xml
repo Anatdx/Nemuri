@@ -37,6 +37,9 @@
     <string name="exempt_vpn">VPN</string>
     <string name="exempt_location">Location</string>
     <string name="monitor_show_system_apps">System apps</string>
+    <string name="freeze_action_freeze">Freeze</string>
+    <string name="freeze_action_thaw">Thaw</string>
+    <string name="freeze_state_frozen">Frozen</string>
     <string name="module_status_active">Module active</string>
     <string name="module_status_inactive">Module inactive</string>
     <string name="module_status_active_description">Connected to %1$s. Nemuri can read framework status through libxposed service.</string>

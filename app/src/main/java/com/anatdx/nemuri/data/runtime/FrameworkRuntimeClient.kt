@@ -31,6 +31,7 @@ data class BackgroundAppSnapshot(
     val uid: Int,
     val aggregateProcState: Int,
     val exemptionFlags: Int,
+    val frozen: Boolean,
     val processes: List<BackgroundProcessDetail>,
 )
 
@@ -65,6 +66,7 @@ object FrameworkRuntimeClient {
                         val uid = reply.readInt()
                         val aggregateProcState = reply.readInt()
                         val exemptionFlags = reply.readInt()
+                        val frozen = reply.readInt() != 0
                         val processCount = reply.readInt().coerceAtLeast(0)
                         val processes = buildList(processCount) {
                             repeat(processCount) {
@@ -83,6 +85,7 @@ object FrameworkRuntimeClient {
                                 uid = uid,
                                 aggregateProcState = aggregateProcState,
                                 exemptionFlags = exemptionFlags,
+                                frozen = frozen,
                                 processes = processes,
                             )
                         )
@@ -96,6 +99,28 @@ object FrameworkRuntimeClient {
         }.getOrElse { throwable ->
             BackgroundProcessResult.Failure(throwable.message ?: throwable.javaClass.simpleName)
         }
+    }
+
+    suspend fun setFrozen(context: Context, uid: Int, frozen: Boolean): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            val binder = requestRuntimeBinder(context.applicationContext) ?: return@withContext false
+            val data = Parcel.obtain()
+            val reply = Parcel.obtain()
+            try {
+                data.writeInterfaceToken(NemuriBridgeProtocol.DESCRIPTOR)
+                data.writeInt(uid)
+                data.writeInt(if (frozen) 1 else 0)
+                val handled = binder.transact(NemuriBridgeProtocol.TRANSACTION_SET_FROZEN, data, reply, 0)
+                if (!handled) {
+                    return@withContext false
+                }
+                reply.readException()
+                reply.readInt() == NemuriBridgeProtocol.REPLY_SUCCESS
+            } finally {
+                reply.recycle()
+                data.recycle()
+            }
+        }.getOrDefault(false)
     }
 
     private fun requestRuntimeBinder(context: Context): IBinder? {

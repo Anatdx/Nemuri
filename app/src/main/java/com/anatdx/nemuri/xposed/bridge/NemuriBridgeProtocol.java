@@ -16,6 +16,7 @@ public final class NemuriBridgeProtocol {
     public static final String EXTRA_BRIDGE_BINDER = "com.anatdx.nemuri.extra.BRIDGE_BINDER";
 
     public static final int TRANSACTION_GET_BACKGROUND_PROCESSES = 1;
+    public static final int TRANSACTION_SET_FROZEN = 2;
     public static final int REPLY_SUCCESS = 0;
     public static final int REPLY_FAILURE = -1;
 

@@ -46,6 +46,7 @@ public final class SystemServerRuntimeBridge {
     private final AtomicBoolean binderPublished = new AtomicBoolean(false);
     private final RuntimeBinder runtimeBinder = new RuntimeBinder();
     private final AppExemptionDetector exemptionDetector;
+    private final FreezeController freezeController;
     private final Set<Integer> vpnUids = ConcurrentHashMap.newKeySet();
 
     private volatile Object activityManagerService;
@@ -65,6 +66,7 @@ public final class SystemServerRuntimeBridge {
         this.xposed = xposed;
         this.classLoader = classLoader;
         this.exemptionDetector = new AppExemptionDetector(xposed);
+        this.freezeController = new FreezeController(xposed);
     }
 
     public void captureActivityManagerService(@NonNull Object instance) {
@@ -344,13 +346,25 @@ public final class SystemServerRuntimeBridge {
                 reply.writeString(NemuriBridgeProtocol.DESCRIPTOR);
                 return true;
             }
-            if (code != NemuriBridgeProtocol.TRANSACTION_GET_BACKGROUND_PROCESSES) {
+            if (code != NemuriBridgeProtocol.TRANSACTION_GET_BACKGROUND_PROCESSES
+                    && code != NemuriBridgeProtocol.TRANSACTION_SET_FROZEN) {
                 return super.onTransact(code, data, reply, flags);
             }
 
             data.enforceInterface(NemuriBridgeProtocol.DESCRIPTOR);
-            if (!isCallerAllowed(Binder.getCallingUid())) {
+            int callingUid = Binder.getCallingUid();
+            if (!isCallerAllowed(callingUid)) {
                 throw new SecurityException("Caller is not allowed to use Nemuri runtime bridge");
+            }
+
+            if (code == NemuriBridgeProtocol.TRANSACTION_SET_FROZEN) {
+                int targetUid = data.readInt();
+                boolean frozen = data.readInt() != 0;
+                // Never let the manager freeze itself (target == caller).
+                boolean ok = targetUid != callingUid && freezeController.setFrozen(targetUid, frozen);
+                reply.writeNoException();
+                reply.writeInt(ok ? NemuriBridgeProtocol.REPLY_SUCCESS : NemuriBridgeProtocol.REPLY_FAILURE);
+                return true;
             }
 
             List<BackgroundApp> apps = collectBackgroundApps();
@@ -367,6 +381,7 @@ public final class SystemServerRuntimeBridge {
                 reply.writeInt(app.uid);
                 reply.writeInt(app.aggregateProcState());
                 reply.writeInt(exemptionFlags);
+                reply.writeInt(freezeController.isFrozen(app.uid) ? 1 : 0);
                 reply.writeInt(app.processes.size());
                 for (RunningProcessSnapshot process : app.processes) {
                     reply.writeString(process.processName);

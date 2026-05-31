@@ -108,7 +108,7 @@ fun HomePage(
         else -> emptyList()
     }
     val runtimeStats = RuntimeStats(
-        frozenBackgroundApps = 0,
+        frozenBackgroundApps = backgroundApps.count { it.frozen },
         totalBackgroundApps = backgroundApps.size
     )
     val deviceName = remember {
@@ -171,7 +171,13 @@ fun HomePage(
             BackgroundAppDetailPage(
                 innerPadding = innerPadding,
                 app = detailApp,
-                info = appInfoByPackage[detailApp.packageName]
+                info = appInfoByPackage[detailApp.packageName],
+                onToggleFrozen = {
+                    scope.launch {
+                        FrameworkRuntimeClient.setFrozen(context, detailApp.uid, !detailApp.frozen)
+                        refreshBackgroundProcesses()
+                    }
+                }
             )
         } else {
             HomeContent(
@@ -540,7 +546,16 @@ private fun BackgroundAppRow(
                 )
             }
             Spacer(modifier = Modifier.width(10.dp))
-            FreezeVerdictLabel(exempt = app.exemptionFlags != NemuriBridgeProtocol.EXEMPT_NONE)
+            if (app.frozen) {
+                Text(
+                    text = stringResource(R.string.freeze_state_frozen),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
+            } else {
+                FreezeVerdictLabel(exempt = app.exemptionFlags != NemuriBridgeProtocol.EXEMPT_NONE)
+            }
         }
     }
 }
@@ -550,6 +565,7 @@ private fun BackgroundAppDetailPage(
     innerPadding: PaddingValues,
     app: BackgroundAppSnapshot,
     info: InstalledAppInfo?,
+    onToggleFrozen: () -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier
@@ -563,6 +579,18 @@ private fun BackgroundAppDetailPage(
         }
         item {
             ExemptionVerdictSection(flags = app.exemptionFlags)
+        }
+        item {
+            Button(
+                onClick = onToggleFrozen,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    stringResource(
+                        if (app.frozen) R.string.freeze_action_thaw else R.string.freeze_action_freeze
+                    )
+                )
+            }
         }
         item {
             Text(

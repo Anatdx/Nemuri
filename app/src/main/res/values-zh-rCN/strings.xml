@@ -37,6 +37,9 @@
     <string name="exempt_vpn">VPN</string>
     <string name="exempt_location">定位</string>
     <string name="monitor_show_system_apps">系统应用</string>
+    <string name="freeze_action_freeze">冻结</string>
+    <string name="freeze_action_thaw">解冻</string>
+    <string name="freeze_state_frozen">已冻结</string>
     <string name="module_status_active">模块已激活</string>
     <string name="module_status_inactive">模块未激活</string>
     <string name="module_status_active_description">已连接到 %1$s，Nemuri 可以通过 libxposed service 读取框架状态。</string>
