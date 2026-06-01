@@ -86,9 +86,20 @@ public final class FreezeEngine {
         this.dryRun = dryRun;
     }
 
-    // Called at boot completion: load persisted policy.
+    // Called at boot completion: load persisted policy and clear any stale frozen apps left in
+    // cgroup from a previous run (the engine re-drives freezing from fresh activity events, so
+    // nothing should start out frozen -- this recovers anything stuck across a framework reload).
     void onBoot() {
         policyStore.load();
+        thawAllFrozenApps();
+    }
+
+    private void thawAllFrozenApps() {
+        try {
+            freezeController.thawAllFrozen();
+        } catch (Throwable throwable) {
+            xposed.log(Log.WARN, TAG, "thawAllFrozenApps failed", throwable);
+        }
     }
 
     boolean applyPolicy(boolean enabled, long delayMs, @NonNull Set<String> whitelist) {
@@ -180,16 +191,18 @@ public final class FreezeEngine {
         }
     }
 
+    // Always thaw on return-to-foreground based on the ACTUAL cgroup state, not on whether the
+    // engine remembers freezing it. engineFrozenKeys is in-memory and lost across a framework
+    // reload, while cgroup.freeze persists -- relying on it would leave apps frozen-stuck after a
+    // reload. Checking the real state also recovers anything left frozen for any reason.
     private void thawNow(@NonNull String key, @NonNull String pkg, int userId) {
-        if (!engineFrozenKeys.remove(key)) {
-            return; // engine didn't freeze it
-        }
+        engineFrozenKeys.remove(key);
         Context ctx = context;
         if (ctx == null) {
             return;
         }
         int uid = resolveUid(ctx, pkg, userId);
-        if (freezeController.isAppUid(uid)) {
+        if (freezeController.isAppUid(uid) && freezeController.isFrozen(uid)) {
             freezeController.setFrozen(uid, false);
         }
     }

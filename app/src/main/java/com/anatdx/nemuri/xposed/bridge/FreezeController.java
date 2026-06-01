@@ -81,4 +81,44 @@ final class FreezeController {
         String base = isolatedLayout ? CGROUP_V2 + "/apps/uid_" : CGROUP_V2 + "/uid_";
         return base + uid + "/cgroup.freeze";
     }
+
+    // Sweep every app cgroup and thaw any that are frozen. Used at boot to clear stale freezes
+    // left over from a previous run so no app stays stuck.
+    void thawAllFrozen() {
+        File dir = new File(isolatedLayout ? CGROUP_V2 + "/apps" : CGROUP_V2);
+        File[] children = dir.listFiles();
+        if (children == null) {
+            return;
+        }
+        int count = 0;
+        for (File child : children) {
+            String name = child.getName();
+            if (!child.isDirectory() || !name.startsWith("uid_")) {
+                continue;
+            }
+            int uid;
+            try {
+                uid = Integer.parseInt(name.substring("uid_".length()));
+            } catch (NumberFormatException ignored) {
+                continue;
+            }
+            if (isAppUid(uid) && isFrozen(uid)) {
+                if (writeFreeze(uid, false)) {
+                    count++;
+                }
+            }
+        }
+        if (count > 0) {
+            xposed.log(Log.INFO, TAG, "Thawed " + count + " stale frozen app(s) at boot");
+        }
+    }
+
+    private boolean writeFreeze(int uid, boolean frozen) {
+        try (PrintWriter writer = new PrintWriter(freezePath(uid))) {
+            writer.write(frozen ? "1" : "0");
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
 }
