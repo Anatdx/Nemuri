@@ -23,9 +23,11 @@
     <string name="background_process_snapshot_refresh">Refresh background snapshot</string>
     <string name="background_process_list_title">Processes</string>
     <string name="background_process_item_detail">pid %1$d - state %2$d</string>
-    <string name="freeze_verdict_title">Policy verdict</string>
-    <string name="freeze_verdict_would_freeze">Would freeze</string>
-    <string name="freeze_verdict_exempt">Exempt</string>
+    <string name="freeze_verdict_title">Freeze status</string>
+    <string name="freeze_status_frozen">Frozen</string>
+    <string name="freeze_status_not_frozen">Not frozen</string>
+    <string name="freeze_status_pending">Pending freeze</string>
+    <string name="settings_group_freeze">Auto freeze</string>
     <string name="exempt_self">Nemuri itself</string>
     <string name="exempt_system">System app</string>
     <string name="exempt_xposed">Xposed module</string>
@@ -39,7 +41,6 @@
     <string name="monitor_show_system_apps">System apps</string>
     <string name="freeze_action_freeze">Freeze</string>
     <string name="freeze_action_thaw">Thaw</string>
-    <string name="freeze_state_frozen">Frozen</string>
     <string name="module_status_active">Module active</string>
     <string name="module_status_inactive">Module inactive</string>
     <string name="module_status_active_description">Connected to %1$s. Nemuri can read framework status through libxposed service.</string>
@@ -71,8 +72,8 @@
     <string name="apps_search_result_count">%1$d results</string>
     <string name="apps_empty">No apps match this filter.</string>
 
-    <string name="policy_enable_freeze">Enable freeze policy</string>
-    <string name="policy_enable_freeze_description">When enabled, Nemuri will include this app in the future freeze policy engine.</string>
+    <string name="policy_enable_freeze">Never freeze</string>
+    <string name="policy_enable_freeze_description">Add this app to the whitelist so auto-freeze never freezes it.</string>
     <string name="policy_relax_charging">Relax while charging</string>
     <string name="policy_relax_charging_description">Use a more conservative freeze policy while charging to reduce background-task disruption.</string>
     <string name="policy_block_wakeups">Block abnormal wakeups</string>
@@ -90,8 +91,8 @@
 
     <string name="settings_title">Settings</string>
     <string name="settings_description">Import or export config, control logging, and view app info.</string>
-    <string name="setting_auto_freeze">Auto freeze</string>
-    <string name="setting_auto_freeze_description">Will control the background freeze entry once the policy engine is ready.</string>
+    <string name="setting_auto_freeze">Enable auto freeze</string>
+    <string name="setting_auto_freeze_description">Freeze user apps a few seconds after they leave the foreground (exemptions and whitelist excluded).</string>
     <string name="setting_wake_guard">Wake guard</string>
     <string name="setting_wake_guard_description">Reserved for abnormal wakeups, service starts, and Binder interactions.</string>
     <string name="setting_debug_logs">Verbose logging</string>

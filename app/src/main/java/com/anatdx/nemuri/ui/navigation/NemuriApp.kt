@@ -81,8 +81,14 @@ fun NemuriApp(appsViewModel: AppsViewModel) {
     val context = LocalContext.current
     val settingsStore = remember { SettingsStore(context) }
     LaunchedEffect(Unit) {
-        // Sync the saved verbose-logging preference to the system_server module on launch.
+        // Sync saved preferences to the system_server module on launch.
         FrameworkRuntimeClient.setLogEnabled(context, settingsStore.verboseLogging)
+        FrameworkRuntimeClient.setPolicy(
+            context = context,
+            enabled = settingsStore.autoFreezeEnabled,
+            whitelist = appsViewModel.whitelistedPackages(),
+            delayMs = settingsStore.freezeDelaySeconds * 1000L,
+        )
     }
     val selectedPageTitle = stringResource(selectedPage.titleRes)
     val appSearchVisible = selectedPage == NemuriPage.Apps && !appsDetailActive && appSearchActive

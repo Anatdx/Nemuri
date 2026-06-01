@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AcUnit
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Folder
@@ -83,7 +84,19 @@ fun SettingsPage(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var verboseLogging by remember { mutableStateOf(settingsStore.verboseLogging) }
+    var autoFreeze by remember { mutableStateOf(settingsStore.autoFreezeEnabled) }
     var showAbout by remember { mutableStateOf(false) }
+
+    fun pushPolicy(enabled: Boolean) {
+        scope.launch {
+            FrameworkRuntimeClient.setPolicy(
+                context = context,
+                enabled = enabled,
+                whitelist = appsViewModel.whitelistedPackages(),
+                delayMs = settingsStore.freezeDelaySeconds * 1000L,
+            )
+        }
+    }
 
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
@@ -127,6 +140,21 @@ fun SettingsPage(
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        item {
+            SettingsGroup(title = stringResource(R.string.settings_group_freeze)) {
+                ToggleRow(
+                    icon = Icons.Rounded.AcUnit,
+                    title = stringResource(R.string.setting_auto_freeze),
+                    description = stringResource(R.string.setting_auto_freeze_description),
+                    checked = autoFreeze,
+                    onCheckedChange = { enabled ->
+                        autoFreeze = enabled
+                        settingsStore.autoFreezeEnabled = enabled
+                        pushPolicy(enabled)
+                    }
+                )
+            }
+        }
         item {
             SettingsGroup(title = stringResource(R.string.settings_group_config)) {
                 ActionRow(

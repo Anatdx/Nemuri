@@ -23,9 +23,11 @@
     <string name="background_process_snapshot_refresh">刷新后台快照</string>
     <string name="background_process_list_title">进程</string>
     <string name="background_process_item_detail">pid %1$d · 状态 %2$d</string>
-    <string name="freeze_verdict_title">策略判定</string>
-    <string name="freeze_verdict_would_freeze">会冻结</string>
-    <string name="freeze_verdict_exempt">豁免</string>
+    <string name="freeze_verdict_title">冻结状态</string>
+    <string name="freeze_status_frozen">已冻结</string>
+    <string name="freeze_status_not_frozen">未冻结</string>
+    <string name="freeze_status_pending">等待冻结</string>
+    <string name="settings_group_freeze">自动冻结</string>
     <string name="exempt_self">Nemuri 自身</string>
     <string name="exempt_system">系统应用</string>
     <string name="exempt_xposed">Xposed 模块</string>
@@ -39,7 +41,6 @@
     <string name="monitor_show_system_apps">系统应用</string>
     <string name="freeze_action_freeze">冻结</string>
     <string name="freeze_action_thaw">解冻</string>
-    <string name="freeze_state_frozen">已冻结</string>
     <string name="module_status_active">模块已激活</string>
     <string name="module_status_inactive">模块未激活</string>
     <string name="module_status_active_description">已连接到 %1$s，Nemuri 可以通过 libxposed service 读取框架状态。</string>
@@ -71,8 +72,8 @@
     <string name="apps_search_result_count">%1$d 个结果</string>
     <string name="apps_empty">没有符合当前筛选的应用。</string>
 
-    <string name="policy_enable_freeze">启用冻结策略</string>
-    <string name="policy_enable_freeze_description">打开后 Nemuri 会把该应用纳入后续冻结策略引擎。</string>
+    <string name="policy_enable_freeze">永不冻结</string>
+    <string name="policy_enable_freeze_description">把该应用加入白名单，自动冻结永远不会冻它。</string>
     <string name="policy_relax_charging">充电时放宽策略</string>
     <string name="policy_relax_charging_description">充电时允许更保守地冻结，降低误杀后台任务的概率。</string>
     <string name="policy_block_wakeups">阻断异常唤醒</string>
@@ -90,8 +91,8 @@
 
     <string name="settings_title">功能设置</string>
     <string name="settings_description">导入导出配置、控制日志输出、查看应用信息。</string>
-    <string name="setting_auto_freeze">自动冻结</string>
-    <string name="setting_auto_freeze_description">策略引擎就绪后用于控制后台冻结入口。</string>
+    <string name="setting_auto_freeze">启用自动冻结</string>
+    <string name="setting_auto_freeze_description">用户应用切到后台几秒后自动冻结（豁免和白名单除外）。</string>
     <string name="setting_wake_guard">唤醒保护</string>
     <string name="setting_wake_guard_description">后续用于处理异常唤醒、服务拉起和 Binder 交互。</string>
     <string name="setting_debug_logs">详细日志输出</string>

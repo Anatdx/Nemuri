@@ -14,6 +14,8 @@ import com.anatdx.nemuri.data.apps.AppPolicy
 import com.anatdx.nemuri.data.apps.AppPolicyStore
 import com.anatdx.nemuri.data.apps.AppRepository
 import com.anatdx.nemuri.data.apps.InstalledAppInfo
+import com.anatdx.nemuri.data.runtime.FrameworkRuntimeClient
+import com.anatdx.nemuri.data.settings.SettingsStore
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -34,6 +36,7 @@ data class AppsUiState(
 class AppsViewModel(application: Application) : AndroidViewModel(application) {
     private val appContext = application.applicationContext
     private val policyStore = AppPolicyStore(appContext)
+    private val settingsStore = SettingsStore(appContext)
     private val _uiState = MutableStateFlow(AppsUiState())
     private var preloadJob: Job? = null
 
@@ -67,8 +70,23 @@ class AppsViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch(Dispatchers.IO) {
             policyStore.save(policy)
+            pushPolicy()
         }
     }
+
+    // Push the auto-freeze policy (master switch + whitelist + delay) to system_server.
+    private suspend fun pushPolicy() {
+        FrameworkRuntimeClient.setPolicy(
+            context = appContext,
+            enabled = settingsStore.autoFreezeEnabled,
+            whitelist = whitelistedPackages(),
+            delayMs = settingsStore.freezeDelaySeconds * 1000L,
+        )
+    }
+
+    // Opt-out model: a per-app policy with enabled=true means "never freeze" (whitelist).
+    fun whitelistedPackages(): List<String> =
+        _uiState.value.policies.values.filter { it.enabled }.map { it.packageName }
 
     suspend fun exportConfig(): String = withContext(Dispatchers.IO) { policyStore.readRawConfig() }
 
@@ -76,6 +94,7 @@ class AppsViewModel(application: Application) : AndroidViewModel(application) {
         val ok = withContext(Dispatchers.IO) { policyStore.writeRawConfig(json) }
         if (ok) {
             refresh()
+            pushPolicy()
         }
         return ok
     }

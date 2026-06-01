@@ -79,6 +79,7 @@ import com.anatdx.nemuri.data.runtime.BackgroundProcessDetail
 import com.anatdx.nemuri.data.runtime.BackgroundProcessResult
 import com.anatdx.nemuri.data.runtime.FrameworkRuntimeClient
 import com.anatdx.nemuri.data.runtime.RuntimeStats
+import com.anatdx.nemuri.data.settings.SettingsStore
 import com.anatdx.nemuri.ui.common.NemuriMotion
 import com.anatdx.nemuri.ui.components.PressableSurface
 import com.anatdx.nemuri.viewmodel.AppsViewModel
@@ -97,6 +98,18 @@ fun HomePage(
     val appsUiState by appsViewModel.uiState.collectAsState()
     val appInfoByPackage = remember(appsUiState.apps) {
         appsUiState.apps.associateBy { it.packageName }
+    }
+    val settingsStore = remember { SettingsStore(context) }
+    val autoFreezeOn = settingsStore.autoFreezeEnabled
+    val whitelist = remember(appsUiState.policies) {
+        appsUiState.policies.values.filter { it.enabled }.map { it.packageName }.toSet()
+    }
+    fun statusOf(app: BackgroundAppSnapshot): FreezeStatus = when {
+        app.frozen -> FreezeStatus.FROZEN
+        !autoFreezeOn -> FreezeStatus.NOT_FROZEN
+        app.exemptionFlags != NemuriBridgeProtocol.EXEMPT_NONE -> FreezeStatus.NOT_FROZEN
+        whitelist.contains(app.packageName) -> FreezeStatus.NOT_FROZEN
+        else -> FreezeStatus.PENDING
     }
     var backgroundResult by remember { mutableStateOf<BackgroundProcessResult?>(null) }
     var loadingBackground by remember { mutableStateOf(false) }
@@ -172,6 +185,7 @@ fun HomePage(
                 innerPadding = innerPadding,
                 app = detailApp,
                 info = appInfoByPackage[detailApp.packageName],
+                status = statusOf(detailApp),
                 onToggleFrozen = {
                     scope.launch {
                         FrameworkRuntimeClient.setFrozen(context, detailApp.uid, !detailApp.frozen)
@@ -192,7 +206,8 @@ fun HomePage(
                 showSystemApps = showSystemApps,
                 onToggleSystemApps = { showSystemApps = !showSystemApps },
                 onRefresh = { scope.launch { refreshBackgroundProcesses() } },
-                onAppClick = { selectedPackage = it }
+                onAppClick = { selectedPackage = it },
+                statusOf = { statusOf(it) }
             )
         }
     }
@@ -212,6 +227,7 @@ private fun HomeContent(
     onToggleSystemApps: () -> Unit,
     onRefresh: () -> Unit,
     onAppClick: (String) -> Unit,
+    statusOf: (BackgroundAppSnapshot) -> FreezeStatus,
 ) {
     val visibleApps = if (showSystemApps) {
         backgroundApps
@@ -262,6 +278,7 @@ private fun HomeContent(
                         BackgroundAppRow(
                             app = app,
                             info = appInfoByPackage[app.packageName],
+                            status = statusOf(app),
                             onClick = { onAppClick(app.packageName) }
                         )
                     }
@@ -506,6 +523,7 @@ private fun BackgroundMonitorHeader(
 private fun BackgroundAppRow(
     app: BackgroundAppSnapshot,
     info: InstalledAppInfo?,
+    status: FreezeStatus,
     onClick: () -> Unit,
 ) {
     PressableSurface(
@@ -546,16 +564,7 @@ private fun BackgroundAppRow(
                 )
             }
             Spacer(modifier = Modifier.width(10.dp))
-            if (app.frozen) {
-                Text(
-                    text = stringResource(R.string.freeze_state_frozen),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.tertiary
-                )
-            } else {
-                FreezeVerdictLabel(exempt = app.exemptionFlags != NemuriBridgeProtocol.EXEMPT_NONE)
-            }
+            FreezeStatusLabel(status = status)
         }
     }
 }
@@ -565,6 +574,7 @@ private fun BackgroundAppDetailPage(
     innerPadding: PaddingValues,
     app: BackgroundAppSnapshot,
     info: InstalledAppInfo?,
+    status: FreezeStatus,
     onToggleFrozen: () -> Unit,
 ) {
     LazyColumn(
@@ -578,7 +588,7 @@ private fun BackgroundAppDetailPage(
             BackgroundAppDetailHeader(app = app, info = info)
         }
         item {
-            ExemptionVerdictSection(flags = app.exemptionFlags)
+            FreezeStatusSection(status = status, flags = app.exemptionFlags)
         }
         item {
             Button(
@@ -721,26 +731,32 @@ private fun AppBitmapIcon(
     }
 }
 
+private enum class FreezeStatus(val labelRes: Int) {
+    FROZEN(R.string.freeze_status_frozen),
+    NOT_FROZEN(R.string.freeze_status_not_frozen),
+    PENDING(R.string.freeze_status_pending),
+}
+
 @Composable
-private fun FreezeVerdictLabel(exempt: Boolean) {
+private fun freezeStatusColor(status: FreezeStatus) = when (status) {
+    FreezeStatus.FROZEN -> MaterialTheme.colorScheme.tertiary
+    FreezeStatus.NOT_FROZEN -> MaterialTheme.colorScheme.secondary
+    FreezeStatus.PENDING -> MaterialTheme.colorScheme.primary
+}
+
+@Composable
+private fun FreezeStatusLabel(status: FreezeStatus) {
     Text(
-        text = stringResource(
-            if (exempt) R.string.freeze_verdict_exempt else R.string.freeze_verdict_would_freeze
-        ),
+        text = stringResource(status.labelRes),
         style = MaterialTheme.typography.labelMedium,
         fontWeight = FontWeight.Medium,
-        color = if (exempt) {
-            MaterialTheme.colorScheme.secondary
-        } else {
-            MaterialTheme.colorScheme.primary
-        }
+        color = freezeStatusColor(status)
     )
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ExemptionVerdictSection(flags: Int) {
-    val exempt = flags != NemuriBridgeProtocol.EXEMPT_NONE
+private fun FreezeStatusSection(status: FreezeStatus, flags: Int) {
     val reasons = exemptionReasonResIds(flags)
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -758,16 +774,10 @@ private fun ExemptionVerdictSection(flags: Int) {
                 fontWeight = FontWeight.Medium
             )
             Text(
-                text = stringResource(
-                    if (exempt) R.string.freeze_verdict_exempt else R.string.freeze_verdict_would_freeze
-                ),
+                text = stringResource(status.labelRes),
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.SemiBold,
-                color = if (exempt) {
-                    MaterialTheme.colorScheme.secondary
-                } else {
-                    MaterialTheme.colorScheme.primary
-                }
+                color = freezeStatusColor(status)
             )
             if (reasons.isNotEmpty()) {
                 FlowRow(
