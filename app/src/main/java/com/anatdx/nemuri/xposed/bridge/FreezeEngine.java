@@ -46,7 +46,7 @@ public final class FreezeEngine {
     private final Set<String> engineFrozenKeys = ConcurrentHashMap.newKeySet();
 
     private volatile Context context;
-    private volatile boolean dryRun = true;
+    private volatile boolean dryRun = false;
 
     public FreezeEngine(
             @NonNull XposedInterface xposed,

@@ -144,6 +144,35 @@ object FrameworkRuntimeClient {
         }.getOrDefault(false)
     }
 
+    suspend fun setPolicy(
+        context: Context,
+        enabled: Boolean,
+        whitelist: List<String>,
+        delayMs: Long,
+    ): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            val binder = requestRuntimeBinder(context.applicationContext) ?: return@withContext false
+            val data = Parcel.obtain()
+            val reply = Parcel.obtain()
+            try {
+                data.writeInterfaceToken(NemuriBridgeProtocol.DESCRIPTOR)
+                data.writeInt(if (enabled) 1 else 0)
+                data.writeLong(delayMs)
+                data.writeInt(whitelist.size)
+                whitelist.forEach { data.writeString(it) }
+                val handled = binder.transact(NemuriBridgeProtocol.TRANSACTION_SET_POLICY, data, reply, 0)
+                if (!handled) {
+                    return@withContext false
+                }
+                reply.readException()
+                reply.readInt() == NemuriBridgeProtocol.REPLY_SUCCESS
+            } finally {
+                reply.recycle()
+                data.recycle()
+            }
+        }.getOrDefault(false)
+    }
+
     private fun requestRuntimeBinder(context: Context): IBinder? {
         val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             context.registerReceiver(

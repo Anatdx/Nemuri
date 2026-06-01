@@ -368,7 +368,8 @@ public final class SystemServerRuntimeBridge {
             }
             if (code != NemuriBridgeProtocol.TRANSACTION_GET_BACKGROUND_PROCESSES
                     && code != NemuriBridgeProtocol.TRANSACTION_SET_FROZEN
-                    && code != NemuriBridgeProtocol.TRANSACTION_SET_LOG_ENABLED) {
+                    && code != NemuriBridgeProtocol.TRANSACTION_SET_LOG_ENABLED
+                    && code != NemuriBridgeProtocol.TRANSACTION_SET_POLICY) {
                 return super.onTransact(code, data, reply, flags);
             }
 
@@ -397,6 +398,23 @@ public final class SystemServerRuntimeBridge {
                     RuntimeLog.verbose = data.readInt() != 0;
                     reply.writeNoException();
                     reply.writeInt(NemuriBridgeProtocol.REPLY_SUCCESS);
+                    return true;
+                }
+
+                if (code == NemuriBridgeProtocol.TRANSACTION_SET_POLICY) {
+                    boolean enabled = data.readInt() != 0;
+                    long delayMs = data.readLong();
+                    int n = Math.max(0, data.readInt());
+                    java.util.Set<String> whitelist = new java.util.HashSet<>();
+                    for (int i = 0; i < n; i++) {
+                        String pkg = data.readString();
+                        if (pkg != null && !pkg.isEmpty()) {
+                            whitelist.add(pkg);
+                        }
+                    }
+                    boolean ok = freezeEngine.applyPolicy(enabled, delayMs, whitelist);
+                    reply.writeNoException();
+                    reply.writeInt(ok ? NemuriBridgeProtocol.REPLY_SUCCESS : NemuriBridgeProtocol.REPLY_FAILURE);
                     return true;
                 }
 
