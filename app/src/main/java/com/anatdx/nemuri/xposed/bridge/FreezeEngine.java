@@ -33,8 +33,13 @@ import io.github.libxposed.api.XposedInterface;
 public final class FreezeEngine {
     private static final String TAG = "Nemuri";
     private static final int MSG_FREEZE = 0;
+    private static final int MSG_SWEEP = 1;
     // UsageEvents.Event.ACTIVITY_DESTROYED is @hide; use its literal value (ACTIVITY_STOPPED + 1).
     private static final int ACTIVITY_DESTROYED = 24;
+    // Periodic sweep catches background apps that never went through a foreground->background
+    // event (e.g. boot-autostarted apps) and would otherwise sit un-frozen forever.
+    private static final long SWEEP_FIRST_DELAY_MS = 15_000L;
+    private static final long SWEEP_INTERVAL_MS = 60_000L;
 
     private final XposedInterface xposed;
     private final FreezeController freezeController;
@@ -47,6 +52,7 @@ public final class FreezeEngine {
 
     private volatile Context context;
     private volatile boolean dryRun = false;
+    private volatile SystemServerRuntimeBridge bridge;
 
     public FreezeEngine(
             @NonNull XposedInterface xposed,
@@ -67,12 +73,16 @@ public final class FreezeEngine {
         this.handler = new Handler(thread.getLooper()) {
             @Override
             public void handleMessage(@NonNull Message msg) {
-                if (msg.what == MSG_FREEZE && msg.obj instanceof String) {
-                    try {
+                try {
+                    if (msg.what == MSG_FREEZE && msg.obj instanceof String) {
                         freezer((String) msg.obj);
-                    } catch (Throwable throwable) {
-                        xposed.log(Log.WARN, TAG, "freezer() failed", throwable);
+                    } else if (msg.what == MSG_SWEEP) {
+                        sweepBackgroundApps();
+                        // reschedule the next sweep
+                        sendMessageDelayed(obtainMessage(MSG_SWEEP), SWEEP_INTERVAL_MS);
                     }
+                } catch (Throwable throwable) {
+                    xposed.log(Log.WARN, TAG, "handleMessage failed", throwable);
                 }
             }
         };
@@ -80,6 +90,10 @@ public final class FreezeEngine {
 
     void setContext(@NonNull Context context) {
         this.context = context;
+    }
+
+    void setBridge(@NonNull SystemServerRuntimeBridge bridge) {
+        this.bridge = bridge;
     }
 
     void setDryRun(boolean dryRun) {
@@ -92,6 +106,8 @@ public final class FreezeEngine {
     void onBoot() {
         policyStore.load();
         thawAllFrozenApps();
+        handler.removeMessages(MSG_SWEEP);
+        handler.sendMessageDelayed(handler.obtainMessage(MSG_SWEEP), SWEEP_FIRST_DELAY_MS);
     }
 
     private void thawAllFrozenApps() {
@@ -150,6 +166,36 @@ public final class FreezeEngine {
                 if (RuntimeLog.verbose) {
                     xposed.log(Log.DEBUG, TAG, "background " + pkg + " -> freeze in " + policyStore.getDelayMs() + "ms");
                 }
+            }
+        }
+    }
+
+    // Periodic catch-all: schedule a freeze for any background app that has no pending timer and
+    // isn't frozen yet. freezer() does the full recheck when the timer fires, so this only needs
+    // to ensure a timer exists. Covers boot-autostarted apps that never sent an activity event.
+    private void sweepBackgroundApps() {
+        if (!policyStore.isEnabled()) {
+            return;
+        }
+        SystemServerRuntimeBridge b = bridge;
+        if (b == null) {
+            return;
+        }
+        for (BackgroundAppRef ref : b.snapshotBackgroundApps()) {
+            if (ref.packageName == null
+                    || NemuriBridgeProtocol.MANAGER_PACKAGE_NAME.equals(ref.packageName)
+                    || policyStore.isWhitelisted(ref.packageName)
+                    || !freezeController.isAppUid(ref.uid)
+                    || freezeController.isFrozen(ref.uid)) {
+                continue;
+            }
+            String key = (ref.uid / 100000) + "#" + ref.packageName;
+            AppFreezeState state = states.get(key);
+            if (state != null && state.isVisible()) {
+                continue; // currently foreground
+            }
+            if (!handler.hasMessages(MSG_FREEZE, key)) {
+                handler.sendMessageDelayed(handler.obtainMessage(MSG_FREEZE, key), policyStore.getDelayMs());
             }
         }
     }

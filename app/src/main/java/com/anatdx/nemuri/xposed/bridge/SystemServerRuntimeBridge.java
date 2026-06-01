@@ -72,6 +72,7 @@ public final class SystemServerRuntimeBridge {
         this.exemptionDetector = new AppExemptionDetector(xposed);
         this.freezeController = new FreezeController(xposed);
         this.freezeEngine = new FreezeEngine(xposed, freezeController, exemptionDetector, vpnUids);
+        this.freezeEngine.setBridge(this);
     }
 
     public FreezeEngine getFreezeEngine() {
@@ -152,6 +153,15 @@ public final class SystemServerRuntimeBridge {
         } catch (Throwable throwable) {
             xposed.log(Log.WARN, TAG, "Failed to initialize ProcessRecord reflection fields", throwable);
         }
+    }
+
+    // Public (package,uid) list for the engine's periodic sweep over current background apps.
+    public List<BackgroundAppRef> snapshotBackgroundApps() {
+        List<BackgroundAppRef> refs = new ArrayList<>();
+        for (BackgroundApp app : collectBackgroundApps()) {
+            refs.add(new BackgroundAppRef(app.packageName, app.uid));
+        }
+        return refs;
     }
 
     private List<BackgroundApp> collectBackgroundApps() {
