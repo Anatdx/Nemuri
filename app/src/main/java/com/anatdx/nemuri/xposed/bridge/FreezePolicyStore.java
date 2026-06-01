@@ -30,6 +30,12 @@ final class FreezePolicyStore {
     private static final String DIR = "/data/misc/Nemuri";
     private static final String FILE = DIR + "/policy.json";
     private static final long DEFAULT_DELAY_MS = 5000L;
+    // Seeded into a fresh policy.json as ordinary whitelist entries (not hard-coded exemptions):
+    // apps that need a persistent background process for messages because they register no OEM
+    // push service. The user can remove them like any other whitelist item.
+    private static final Set<String> DEFAULT_WHITELIST = Set.of(
+            "com.tencent.mm" // WeChat
+    );
 
     private final XposedInterface xposed;
     private volatile boolean autoFreezeEnabled = false; // default off for safety
@@ -68,7 +74,10 @@ final class FreezePolicyStore {
         try {
             File file = new File(FILE);
             if (!file.exists()) {
-                return; // keep defaults (disabled)
+                // First run: seed the default whitelist and persist a starting policy.json.
+                whitelist.addAll(DEFAULT_WHITELIST);
+                save();
+                return;
             }
             StringBuilder sb = new StringBuilder();
             try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(file))) {

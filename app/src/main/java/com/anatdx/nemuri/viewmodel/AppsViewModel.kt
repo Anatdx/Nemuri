@@ -23,6 +23,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -74,8 +75,17 @@ class AppsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Push the auto-freeze policy (master switch + whitelist + delay) to system_server.
-    private suspend fun pushPolicy() {
+    // Set the master switch and push the full policy. Single entry point for the settings toggle
+    // so the whitelist is never sent empty (which would wipe the persisted/seeded one).
+    fun setAutoFreeze(enabled: Boolean) {
+        settingsStore.autoFreezeEnabled = enabled
+        viewModelScope.launch { pushPolicy() }
+    }
+
+    // Push current saved prefs + loaded whitelist to system_server. Waits for policies to finish
+    // loading first, so the whitelist is complete.
+    suspend fun pushPolicy() {
+        _uiState.first { !it.loading }
         FrameworkRuntimeClient.setPolicy(
             context = appContext,
             enabled = settingsStore.autoFreezeEnabled,

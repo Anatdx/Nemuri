@@ -87,17 +87,6 @@ fun SettingsPage(
     var autoFreeze by remember { mutableStateOf(settingsStore.autoFreezeEnabled) }
     var showAbout by remember { mutableStateOf(false) }
 
-    fun pushPolicy(enabled: Boolean) {
-        scope.launch {
-            FrameworkRuntimeClient.setPolicy(
-                context = context,
-                enabled = enabled,
-                whitelist = appsViewModel.whitelistedPackages(),
-                delayMs = settingsStore.freezeDelaySeconds * 1000L,
-            )
-        }
-    }
-
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
     ) { uri ->
@@ -149,8 +138,7 @@ fun SettingsPage(
                     checked = autoFreeze,
                     onCheckedChange = { enabled ->
                         autoFreeze = enabled
-                        settingsStore.autoFreezeEnabled = enabled
-                        pushPolicy(enabled)
+                        appsViewModel.setAutoFreeze(enabled)
                     }
                 )
             }

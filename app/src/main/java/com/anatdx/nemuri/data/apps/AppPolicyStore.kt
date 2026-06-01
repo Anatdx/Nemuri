@@ -22,7 +22,9 @@ class AppPolicyStore(context: Context) {
 
     fun loadAll(): Map<String, AppPolicy> {
         if (!file.exists()) {
-            return emptyMap()
+            // First run: seed the default whitelist (enabled = "never freeze") so it shows and
+            // propagates like any user choice; the user can remove it.
+            return DEFAULT_WHITELIST.associateWith { AppPolicy(packageName = it, enabled = true) }
         }
 
         return runCatching {
@@ -67,6 +69,10 @@ class AppPolicyStore(context: Context) {
 
     private companion object {
         const val FILE_NAME = "app_policies.json"
+
+        // Apps seeded into the whitelist on first run: they need a persistent background process
+        // for messages (no OEM push service registered). Plain whitelist entries the user can remove.
+        val DEFAULT_WHITELIST = listOf("com.tencent.mm") // WeChat
     }
 }
 
