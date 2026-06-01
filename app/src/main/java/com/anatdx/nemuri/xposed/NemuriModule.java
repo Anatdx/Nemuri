@@ -9,14 +9,18 @@
 
 package com.anatdx.nemuri.xposed;
 
+import android.content.ComponentName;
+import android.os.IBinder;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
 
 import java.lang.reflect.Method;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import com.anatdx.nemuri.xposed.bridge.FreezeEngine;
 import com.anatdx.nemuri.xposed.bridge.RuntimeLog;
 import com.anatdx.nemuri.xposed.bridge.SystemServerRuntimeBridge;
 
@@ -69,6 +73,7 @@ public final class NemuriModule extends XposedModule {
         hookRuntimeBinderPublish(classLoader);
         hookVpnState(classLoader);
         hookCachedAppOptimizerControl(classLoader);
+        hookActivityUsageStats(classLoader);
         hookMethods(
                 classLoader,
                 "com.android.server.am.ActivityManagerService",
@@ -214,6 +219,43 @@ public final class NemuriModule extends XposedModule {
         }
     }
 
+    // Drives the auto-freeze engine. On this device updateActivityUsageStats lives on
+    // ActivityManagerService (not ATMS). Real signature: updateActivityUsageStats(
+    // ComponentName activity, int userId, int event, IBinder appToken, ComponentName taskRoot,
+    // ActivityId activityId).
+    private void hookActivityUsageStats(@NonNull ClassLoader classLoader) {
+        Class<?> targetClass;
+        try {
+            targetClass = Class.forName("com.android.server.am.ActivityManagerService", false, classLoader);
+        } catch (Throwable tr) {
+            log(Log.WARN, TAG, "Framework hook target missing: ActivityManagerService (usage stats)");
+            return;
+        }
+
+        int installed = 0;
+        for (Method method : targetClass.getDeclaredMethods()) {
+            if (!"updateActivityUsageStats".equals(method.getName())) {
+                continue;
+            }
+            Class<?>[] params = method.getParameterTypes();
+            // Match the ComponentName-first overload that carries the activity token.
+            if (params.length < 4 || params[0] != ComponentName.class
+                    || params[1] != int.class || params[2] != int.class || params[3] != IBinder.class) {
+                continue;
+            }
+            try {
+                method.setAccessible(true);
+                hook(method).intercept(new ActivityUsageStatsHooker());
+                installed++;
+            } catch (Throwable tr) {
+                log(Log.ERROR, TAG, "Failed to hook updateActivityUsageStats", tr);
+            }
+        }
+        if (installed > 0) {
+            log(Log.INFO, TAG, "Hook installed: ActivityManagerService#updateActivityUsageStats (" + installed + " overloads)");
+        }
+    }
+
     private void hookMethods(
             @NonNull ClassLoader classLoader,
             @NonNull String className,
@@ -347,6 +389,37 @@ public final class NemuriModule extends XposedModule {
             }
         }
         return -1;
+    }
+
+    // Forwards activity usage events to the freeze engine after the original runs.
+    private final class ActivityUsageStatsHooker implements XposedInterface.Hooker {
+        @Override
+        public Object intercept(@NonNull XposedInterface.Chain chain) throws Throwable {
+            Object result = chain.proceed();
+            try {
+                SystemServerRuntimeBridge bridge = runtimeBridge;
+                List<Object> args = chain.getArgs();
+                if (bridge != null && args.size() >= 4
+                        && args.get(0) instanceof ComponentName
+                        && args.get(1) instanceof Integer
+                        && args.get(2) instanceof Integer
+                        && args.get(3) instanceof IBinder) {
+                    FreezeEngine engine = bridge.getFreezeEngine();
+                    if (engine != null) {
+                        engine.onActivityEvent(
+                                (ComponentName) args.get(0),
+                                (Integer) args.get(1),
+                                (Integer) args.get(2),
+                                (IBinder) args.get(3));
+                    }
+                }
+            } catch (Throwable throwable) {
+                if (RuntimeLog.verbose) {
+                    log(Log.WARN, TAG, "updateActivityUsageStats hook failed", throwable);
+                }
+            }
+            return result;
+        }
     }
 
     // useFreezer() -> Z. Replace with FALSE so the framework thinks its freezer is unavailable.

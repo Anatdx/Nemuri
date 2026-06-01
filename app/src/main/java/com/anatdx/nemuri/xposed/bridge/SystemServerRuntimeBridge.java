@@ -51,6 +51,7 @@ public final class SystemServerRuntimeBridge {
     private final AppExemptionDetector exemptionDetector;
     private final FreezeController freezeController;
     private final Set<Integer> vpnUids = ConcurrentHashMap.newKeySet();
+    private final FreezeEngine freezeEngine;
 
     private volatile Object activityManagerService;
     private volatile Object mLruProcesses;
@@ -70,6 +71,11 @@ public final class SystemServerRuntimeBridge {
         this.classLoader = classLoader;
         this.exemptionDetector = new AppExemptionDetector(xposed);
         this.freezeController = new FreezeController(xposed);
+        this.freezeEngine = new FreezeEngine(xposed, freezeController, exemptionDetector, vpnUids);
+    }
+
+    public FreezeEngine getFreezeEngine() {
+        return freezeEngine;
     }
 
     public void captureActivityManagerService(@NonNull Object instance) {
@@ -77,6 +83,9 @@ public final class SystemServerRuntimeBridge {
         systemContext = readContext(instance);
         mLruProcesses = readLruProcesses(instance);
         initProcessFields();
+        if (systemContext != null) {
+            freezeEngine.setContext(systemContext);
+        }
         // Publishing is intentionally deferred to boot completion. setSystemProcess runs
         // during startBootstrapServices, long before AMS#mProcessesReady, so calling
         // sendStickyBroadcast here throws "Cannot broadcast before boot completed".
@@ -342,6 +351,7 @@ public final class SystemServerRuntimeBridge {
             intent.putExtras(extras);
             context.sendStickyBroadcast(intent);
             xposed.log(Log.INFO, TAG, "Published Nemuri runtime Binder sticky broadcast.");
+            freezeEngine.onBoot(); // load persisted auto-freeze policy once the system is ready
         } catch (Throwable throwable) {
             binderPublished.set(false);
             xposed.log(Log.WARN, TAG, "Failed to publish Nemuri runtime Binder sticky broadcast", throwable);
