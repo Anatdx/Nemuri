@@ -68,6 +68,7 @@ public final class NemuriModule extends XposedModule {
         hookActivityManagerServiceCapture(classLoader);
         hookRuntimeBinderPublish(classLoader);
         hookVpnState(classLoader);
+        hookCachedAppOptimizerControl(classLoader);
         hookMethods(
                 classLoader,
                 "com.android.server.am.ActivityManagerService",
@@ -179,6 +180,37 @@ public final class NemuriModule extends XposedModule {
         }
         if (installed > 0) {
             log(Log.INFO, TAG, "Hook installed: Vpn#updateState (" + installed + " overloads)");
+        }
+    }
+
+    // Neutralize the framework's own freezer so Nemuri has exclusive control of cgroup.freeze.
+    // Both methods return boolean (useFreezer ()Z, enableFreezer (Z)Z) -- the replacement MUST
+    // return a Boolean, never null, or system_server NPEs on unboxing.
+    private void hookCachedAppOptimizerControl(@NonNull ClassLoader classLoader) {
+        Class<?> targetClass;
+        try {
+            targetClass = Class.forName("com.android.server.am.CachedAppOptimizer", false, classLoader);
+        } catch (Throwable tr) {
+            log(Log.WARN, TAG, "Framework hook target missing: com.android.server.am.CachedAppOptimizer");
+            return;
+        }
+
+        for (Method method : targetClass.getDeclaredMethods()) {
+            String name = method.getName();
+            try {
+                if ("useFreezer".equals(name) && method.getParameterTypes().length == 0) {
+                    method.setAccessible(true);
+                    hook(method).intercept(new UseFreezerHooker());
+                    log(Log.INFO, TAG, "Hook installed: CachedAppOptimizer#useFreezer (force-disabled)");
+                } else if ("enableFreezer".equals(name) && method.getParameterTypes().length == 1
+                        && method.getParameterTypes()[0] == boolean.class) {
+                    method.setAccessible(true);
+                    hook(method).intercept(new EnableFreezerHooker());
+                    log(Log.INFO, TAG, "Hook installed: CachedAppOptimizer#enableFreezer (force-disabled)");
+                }
+            } catch (Throwable tr) {
+                log(Log.ERROR, TAG, "Failed to hook CachedAppOptimizer#" + name, tr);
+            }
         }
     }
 
@@ -315,6 +347,35 @@ public final class NemuriModule extends XposedModule {
             }
         }
         return -1;
+    }
+
+    // useFreezer() -> Z. Replace with FALSE so the framework thinks its freezer is unavailable.
+    private final class UseFreezerHooker implements XposedInterface.Hooker {
+        @Override
+        public Object intercept(@NonNull XposedInterface.Chain chain) {
+            return Boolean.FALSE;
+        }
+    }
+
+    // enableFreezer(boolean) -> Z. Clear mUseFreezer (only if currently set, like Cirno) and
+    // return FALSE -- never null, the method's return type is boolean.
+    private final class EnableFreezerHooker implements XposedInterface.Hooker {
+        @Override
+        public Object intercept(@NonNull XposedInterface.Chain chain) {
+            try {
+                Object instance = chain.getThisObject();
+                if (instance != null) {
+                    java.lang.reflect.Field field = instance.getClass().getDeclaredField("mUseFreezer");
+                    field.setAccessible(true);
+                    if (field.getBoolean(instance)) {
+                        field.setBoolean(instance, false);
+                    }
+                }
+            } catch (Throwable throwable) {
+                log(Log.WARN, TAG, "Failed to clear mUseFreezer", throwable);
+            }
+            return Boolean.FALSE;
+        }
     }
 
 }
