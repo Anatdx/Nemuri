@@ -10,6 +10,7 @@
 package com.anatdx.nemuri.xposed;
 
 import android.content.ComponentName;
+import android.content.pm.ApplicationInfo;
 import android.os.IBinder;
 import android.util.Log;
 
@@ -81,11 +82,7 @@ public final class NemuriModule extends XposedModule {
                 "killUid",
                 "killPackageProcessesLSP"
         );
-        hookMethods(
-                classLoader,
-                "com.android.server.am.ProcessList",
-                "startProcessLocked"
-        );
+        hookProcessStart(classLoader);
         hookMethods(
                 classLoader,
                 "com.android.server.am.CachedAppOptimizer",
@@ -256,6 +253,39 @@ public final class NemuriModule extends XposedModule {
         }
     }
 
+    // Hook the top-level ProcessList#startProcessLocked(String, ApplicationInfo, ...) so every
+    // process launch (boot autostart, pulled up, woken) feeds the engine immediately.
+    private void hookProcessStart(@NonNull ClassLoader classLoader) {
+        Class<?> targetClass;
+        try {
+            targetClass = Class.forName("com.android.server.am.ProcessList", false, classLoader);
+        } catch (Throwable tr) {
+            log(Log.WARN, TAG, "Framework hook target missing: com.android.server.am.ProcessList");
+            return;
+        }
+
+        int installed = 0;
+        for (Method method : targetClass.getDeclaredMethods()) {
+            if (!"startProcessLocked".equals(method.getName())) {
+                continue;
+            }
+            Class<?>[] params = method.getParameterTypes();
+            if (params.length < 2 || params[0] != String.class || params[1] != ApplicationInfo.class) {
+                continue;
+            }
+            try {
+                method.setAccessible(true);
+                hook(method).intercept(new ProcessStartHooker());
+                installed++;
+            } catch (Throwable tr) {
+                log(Log.ERROR, TAG, "Failed to hook ProcessList#startProcessLocked", tr);
+            }
+        }
+        if (installed > 0) {
+            log(Log.INFO, TAG, "Hook installed: ProcessList#startProcessLocked (" + installed + " overloads)");
+        }
+    }
+
     private void hookMethods(
             @NonNull ClassLoader classLoader,
             @NonNull String className,
@@ -416,6 +446,30 @@ public final class NemuriModule extends XposedModule {
             } catch (Throwable throwable) {
                 if (RuntimeLog.verbose) {
                     log(Log.WARN, TAG, "updateActivityUsageStats hook failed", throwable);
+                }
+            }
+            return result;
+        }
+    }
+
+    // Feeds the freeze engine on every process launch. Light: just reads pkg/uid and hands off.
+    private final class ProcessStartHooker implements XposedInterface.Hooker {
+        @Override
+        public Object intercept(@NonNull XposedInterface.Chain chain) throws Throwable {
+            Object result = chain.proceed();
+            try {
+                SystemServerRuntimeBridge bridge = runtimeBridge;
+                List<Object> args = chain.getArgs();
+                if (bridge != null && args.size() >= 2 && args.get(1) instanceof ApplicationInfo) {
+                    FreezeEngine engine = bridge.getFreezeEngine();
+                    ApplicationInfo info = (ApplicationInfo) args.get(1);
+                    if (engine != null && info.packageName != null) {
+                        engine.onProcessStarted(info.packageName, info.uid);
+                    }
+                }
+            } catch (Throwable throwable) {
+                if (RuntimeLog.verbose) {
+                    log(Log.WARN, TAG, "startProcessLocked hook failed", throwable);
                 }
             }
             return result;

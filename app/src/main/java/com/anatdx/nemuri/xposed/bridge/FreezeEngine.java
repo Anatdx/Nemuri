@@ -36,10 +36,10 @@ public final class FreezeEngine {
     private static final int MSG_SWEEP = 1;
     // UsageEvents.Event.ACTIVITY_DESTROYED is @hide; use its literal value (ACTIVITY_STOPPED + 1).
     private static final int ACTIVITY_DESTROYED = 24;
-    // Periodic sweep catches background apps that never went through a foreground->background
-    // event (e.g. boot-autostarted apps) and would otherwise sit un-frozen forever.
-    private static final long SWEEP_FIRST_DELAY_MS = 15_000L;
-    private static final long SWEEP_INTERVAL_MS = 60_000L;
+    // Low-frequency safety-net sweep. The process-start hook handles autostart/woken apps in real
+    // time; this only catches anything the hooks might have missed, so it can be infrequent.
+    private static final long SWEEP_FIRST_DELAY_MS = 60_000L;
+    private static final long SWEEP_INTERVAL_MS = 300_000L;
 
     private final XposedInterface xposed;
     private final FreezeController freezeController;
@@ -125,6 +125,29 @@ public final class FreezeEngine {
             thawAllEngineFrozen(); // turning the engine off releases everything it froze
         }
         return true;
+    }
+
+    // From the ProcessList#startProcessLocked hook: a process is being (re)started. Schedule a
+    // freeze so apps launched by any path (boot autostart, pulled up by others, woken) get caught
+    // immediately, not only by the periodic sweep. freezer() does the full recheck on fire.
+    // Kept extremely light: this runs in the AMS lock on a hot path; real work is on our thread.
+    public void onProcessStarted(String packageName, int uid) {
+        if (!policyStore.isEnabled()
+                || packageName == null
+                || packageName.isEmpty()
+                || NemuriBridgeProtocol.MANAGER_PACKAGE_NAME.equals(packageName)
+                || !freezeController.isAppUid(uid)
+                || policyStore.isWhitelisted(packageName)) {
+            return;
+        }
+        String key = (uid / 100000) + "#" + packageName;
+        AppFreezeState state = states.get(key);
+        if (state != null && state.isVisible()) {
+            return;
+        }
+        if (!handler.hasMessages(MSG_FREEZE, key)) {
+            handler.sendMessageDelayed(handler.obtainMessage(MSG_FREEZE, key), policyStore.getDelayMs());
+        }
     }
 
     // From the ATMS hook. activity may be null for some events; event is a UsageEvents.Event.
