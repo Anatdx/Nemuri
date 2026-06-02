@@ -247,20 +247,27 @@ class FreezeEngine(
     // O(1) hot-path check for the binder hook: is this uid currently frozen by the engine?
     fun isUidFrozenFast(uid: Int): Boolean = frozenUidToKey.containsKey(uid)
 
-    // Step A observation only: log a reportBinderTrans whose int args hit a frozen uid, so we can
-    // confirm which class has traffic, which arg is the target uid, and arg5's real meaning.
-    // Removed once the semantics are confirmed.
-    fun observeBinderTrans(cls: String, args: List<Any?>) {
-        if (!RuntimeLog.verbose || args.size != 8) return
-        for (i in 0..4) {
-            val v = args[i] as? Int ?: continue
-            if (isUidFrozenFast(v)) {
-                xposed.log(
-                    Log.INFO, TAG,
-                    "binderTrans hit cls=$cls argIdx=$i uid=$v arg5=${args[5]} all=$args"
-                )
-                break
+    // Called from reportBinderTrans (binder hot path) when a frozen app is the target of a binder
+    // transaction: thaw it for a window so the call can be served, then re-freeze. Hot path: the
+    // O(1) map lookup returns immediately for the vast majority (non-frozen uids).
+    fun temporaryUnfreeze(uid: Int, reason: String, durationMs: Long) {
+        val key = frozenUidToKey[uid] ?: return
+        if (!policyStore.isBinderUnfreezeEnabled()) return
+        try {
+            if (freezeController.isAppUid(uid) && freezeController.isFrozen(uid)) {
+                freezeController.setFrozen(uid, false)
             }
+            engineFrozenKeys.remove(key)
+            frozenUidToKey.remove(uid)
+            if (RuntimeLog.verbose) {
+                xposed.log(Log.DEBUG, TAG, "tmp-thaw $key reason=$reason ${durationMs}ms")
+            }
+            // Re-freeze after the window via freezer(), which re-checks exemptions/whitelist/visibility
+            // (so a return-to-foreground or whitelisting during the window won't get re-frozen).
+            handler.removeMessages(MSG_FREEZE, key)
+            handler.sendMessageDelayed(handler.obtainMessage(MSG_FREEZE, key), durationMs)
+        } catch (throwable: Throwable) {
+            xposed.log(Log.WARN, TAG, "temporaryUnfreeze failed uid=$uid", throwable)
         }
     }
 

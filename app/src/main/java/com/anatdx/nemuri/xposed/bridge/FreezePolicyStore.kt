@@ -23,9 +23,14 @@ class FreezePolicyStore(private val xposed: XposedInterface) {
 
     @Volatile
     private var freezeDelayMs = DEFAULT_DELAY_MS
+
+    @Volatile
+    private var binderUnfreezeEnabled = true // temp-unfreeze on synchronous binder, default on
     private val whitelist: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     fun isEnabled(): Boolean = autoFreezeEnabled
+
+    fun isBinderUnfreezeEnabled(): Boolean = binderUnfreezeEnabled
 
     fun getDelayMs(): Long = freezeDelayMs
 

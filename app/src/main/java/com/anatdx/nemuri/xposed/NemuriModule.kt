@@ -53,7 +53,7 @@ class NemuriModule : XposedModule() {
         hookVpnState(classLoader)
         hookCachedAppOptimizerControl(classLoader)
         hookActivityUsageStats(classLoader)
-        hookBinderTransObserve(classLoader)
+        hookBinderTrans(classLoader)
         hookMethods(
             classLoader,
             "com.android.server.am.ActivityManagerService",
@@ -239,10 +239,10 @@ class NemuriModule : XposedModule() {
         }
     }
 
-    // Step A: observe reportBinderTrans across HyperOS's candidate freeze classes. The signature on
-    // this device is (int x5, boolean, long, long); the arg semantics and which class actually has
-    // traffic must be confirmed on-device, so for now we only log hits against frozen uids.
-    private fun hookBinderTransObserve(classLoader: ClassLoader) {
+    // Temp-unfreeze on synchronous binder to a frozen app. reportBinderTrans on this device has
+    // signature (int x5, boolean, long, long) and lives on the SmartPower classes (Greeze's didn't
+    // see traffic, but we hook all present candidates harmlessly). arg0 = target uid.
+    private fun hookBinderTrans(classLoader: ClassLoader) {
         for (className in BINDER_TRANS_CLASSES) {
             val targetClass = try {
                 Class.forName(className, false, classLoader)
@@ -256,7 +256,7 @@ class NemuriModule : XposedModule() {
                 }
                 try {
                     method.isAccessible = true
-                    hook(method).intercept(BinderTransObserveHooker(className))
+                    hook(method).intercept(BinderTransActionHooker())
                     installed++
                 } catch (tr: Throwable) {
                     log(Log.ERROR, TAG, "Failed to hook $className#reportBinderTrans", tr)
@@ -422,12 +422,17 @@ class NemuriModule : XposedModule() {
         }
     }
 
-    // Step A: forward reportBinderTrans to the engine's observer (logging only).
-    private inner class BinderTransObserveHooker(private val cls: String) : XposedInterface.Hooker {
+    // reportBinderTrans(dstUid, ...): a binder transaction targeting dstUid. If dstUid is a frozen
+    // app, temporarily unfreeze it so the call can be served (avoids the caller hanging to ANR).
+    // arg0 = target uid (confirmed on-device). We don't gate on the oneway flag for now -- thawing
+    // on a few oneway calls is harmless and safer than missing a sync one. Hot path: temporaryUnfreeze
+    // returns immediately for non-frozen uids.
+    private inner class BinderTransActionHooker : XposedInterface.Hooker {
         override fun intercept(chain: XposedInterface.Chain): Any? {
             val result = chain.proceed()
             try {
-                runtimeBridge?.freezeEngine?.observeBinderTrans(cls, chain.args)
+                val dstUid = chain.args.firstOrNull() as? Int ?: return result
+                runtimeBridge?.freezeEngine?.temporaryUnfreeze(dstUid, "Binder", BINDER_UNFREEZE_MS)
             } catch (throwable: Throwable) {
                 // hot path: swallow
             }
@@ -462,6 +467,7 @@ class NemuriModule : XposedModule() {
 
     private companion object {
         const val TAG = "Nemuri"
+        const val BINDER_UNFREEZE_MS = 3000L
 
         // HyperOS has both Greeze and SmartPower freeze stacks; reportBinderTrans exists on several
         // classes. Hook all present ones for observation, then narrow to the one with real traffic.
