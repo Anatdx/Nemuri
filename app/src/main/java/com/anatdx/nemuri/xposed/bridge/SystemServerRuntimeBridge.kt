@@ -33,6 +33,7 @@ class SystemServerRuntimeBridge(
     private val freezeController = FreezeController(xposed)
     private val vpnUids: MutableSet<Int> = ConcurrentHashMap.newKeySet()
     val freezeEngine: FreezeEngine = FreezeEngine(xposed, freezeController, exemptionDetector, vpnUids)
+    val binderUnfreezeCoordinator = BinderUnfreezeCoordinator(xposed, freezeEngine)
 
     @Volatile private var activityManagerService: Any? = null
     @Volatile private var mLruProcesses: Any? = null
@@ -254,6 +255,7 @@ class SystemServerRuntimeBridge(
             context.sendStickyBroadcast(intent)
             xposed.log(Log.INFO, TAG, "Published Nemuri runtime Binder sticky broadcast.")
             freezeEngine.onBoot() // load persisted auto-freeze policy once the system is ready
+            binderUnfreezeCoordinator.startIfAvailable() // start Re-Kernel backend if present
         } catch (throwable: Throwable) {
             binderPublished.set(false)
             xposed.log(Log.WARN, TAG, "Failed to publish Nemuri runtime Binder sticky broadcast", throwable)

@@ -431,8 +431,11 @@ class NemuriModule : XposedModule() {
         override fun intercept(chain: XposedInterface.Chain): Any? {
             val result = chain.proceed()
             try {
+                val bridge = runtimeBridge ?: return result
+                // Re-Kernel backend, once active, owns binder unfreezing -- yield to it.
+                if (bridge.binderUnfreezeCoordinator.isRekernelActive()) return result
                 val dstUid = chain.args.firstOrNull() as? Int ?: return result
-                runtimeBridge?.freezeEngine?.temporaryUnfreeze(dstUid, "Binder", BINDER_UNFREEZE_MS)
+                bridge.freezeEngine.temporaryUnfreeze(dstUid, "Binder", BINDER_UNFREEZE_MS)
             } catch (throwable: Throwable) {
                 // hot path: swallow
             }
