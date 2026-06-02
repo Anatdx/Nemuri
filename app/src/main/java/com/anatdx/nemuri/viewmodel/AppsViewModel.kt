@@ -10,6 +10,7 @@
 package com.anatdx.nemuri.viewmodel
 
 import android.app.Application
+import com.anatdx.nemuri.data.apps.AppInfoCache
 import com.anatdx.nemuri.data.apps.AppPolicy
 import com.anatdx.nemuri.data.apps.AppPolicyStore
 import com.anatdx.nemuri.data.apps.AppRepository
@@ -38,6 +39,7 @@ class AppsViewModel(application: Application) : AndroidViewModel(application) {
     private val appContext = application.applicationContext
     private val policyStore = AppPolicyStore(appContext)
     private val settingsStore = SettingsStore(appContext)
+    private val infoCache = AppInfoCache(appContext)
     private val _uiState = MutableStateFlow(AppsUiState())
     private var preloadJob: Job? = null
 
@@ -51,17 +53,28 @@ class AppsViewModel(application: Application) : AndroidViewModel(application) {
     fun refresh() {
         preloadJob?.cancel()
         preloadJob = viewModelScope.launch {
-            _uiState.update { it.copy(loading = true) }
-            val loaded = withContext(Dispatchers.IO) {
-                val apps = AppRepository.loadInstalledApps(appContext)
-                val policies = policyStore.loadAll()
-                apps to policies
+            val policies = withContext(Dispatchers.IO) { policyStore.loadAll() }
+
+            // Show the disk cache immediately (instant icons/labels), if any.
+            val cached = withContext(Dispatchers.IO) { infoCache.load() }
+            if (cached.isNotEmpty()) {
+                _uiState.value = AppsUiState(apps = cached, policies = policies, loading = false)
+            } else {
+                _uiState.update { it.copy(policies = policies, loading = true) }
             }
-            _uiState.value = AppsUiState(
-                apps = loaded.first,
-                policies = loaded.second,
-                loading = false,
-            )
+
+            // Then re-read PackageManager in the background and refresh the cache + UI if the set
+            // of apps changed (compare by identity fields; Bitmap equality is reference-based).
+            val fresh = withContext(Dispatchers.IO) {
+                AppRepository.loadInstalledApps(appContext).also { infoCache.save(it) }
+            }
+            fun signature(list: List<InstalledAppInfo>) =
+                list.map { Triple(it.packageName, it.label, it.system) }
+            if (cached.isEmpty() || signature(fresh) != signature(cached)) {
+                _uiState.value = AppsUiState(apps = fresh, policies = policies, loading = false)
+            } else {
+                _uiState.update { it.copy(loading = false) }
+            }
         }
     }
 
