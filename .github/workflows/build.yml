@@ -1,0 +1,98 @@
+name: Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+    paths-ignore:
+      - '**.md'
+      - 'art/**'
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history: versionCode/versionName derive from the commit count.
+          fetch-depth: 0
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Decode keystore
+        id: keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No KEYSTORE secret; building an unsigned release APK."
+          fi
+
+      - name: Check Telegram secrets
+        id: tg
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -n "$BOT_TOKEN" ] && [ -n "$CHAT_ID" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build release APK
+        env:
+          NEMURI_KEYSTORE: ${{ steps.keystore.outputs.available == 'true' && format('{0}/release.jks', runner.temp) || '' }}
+          NEMURI_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          NEMURI_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          NEMURI_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Locate APK
+        id: apk
+        run: |
+          apk=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
+          echo "path=$apk" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$apk")" >> "$GITHUB_OUTPUT"
+          echo "version=0.1.0-$(printf '%04d' "$(git rev-list --count HEAD)")" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nemuri-release
+          path: app/build/outputs/apk/release/*.apk
+
+      - name: Upload to Telegram
+        if: ${{ github.event_name != 'pull_request' && steps.tg.outputs.enabled == 'true' }}
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MESSAGE_THREAD_ID: ${{ secrets.TELEGRAM_TOPIC_ID }}
+          SESSION_STRING: ${{ secrets.TELEGRAM_SESSION }}
+          TITLE: Nemuri
+          VERSION: ${{ steps.apk.outputs.version }}
+          BRANCH: ${{ github.ref_name }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          pip3 install --quiet telethon
+          python3 scripts/nemuribot.py "${{ steps.apk.outputs.path }}"

@@ -37,3 +37,7 @@ google-services.json
 /app/release/
 
 .claude/
+
+# Python
+__pycache__/
+*.pyc
