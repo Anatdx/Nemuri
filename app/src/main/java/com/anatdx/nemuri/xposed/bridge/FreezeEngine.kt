@@ -33,6 +33,11 @@ class FreezeEngine(
     private val states = ConcurrentHashMap<String, AppFreezeState>()
     private val engineFrozenKeys: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
+    // uid -> "userId#pkg" for the apps the engine has frozen. Lets the binder hot path decide
+    // "is this uid frozen?" with an O(1) lookup, no cgroup read or PackageManager. Maintained in
+    // lockstep with engineFrozenKeys.
+    private val frozenUidToKey = ConcurrentHashMap<Int, String>()
+
     @Volatile
     private var context: Context? = null
 
@@ -206,6 +211,7 @@ class FreezeEngine(
         }
         if (freezeController.setFrozen(uid, true)) {
             engineFrozenKeys.add(key)
+            frozenUidToKey[uid] = key
         }
     }
 
@@ -217,6 +223,7 @@ class FreezeEngine(
         engineFrozenKeys.remove(key)
         val ctx = context ?: return
         val uid = resolveUid(ctx, pkg, userId)
+        frozenUidToKey.remove(uid)
         if (freezeController.isAppUid(uid) && freezeController.isFrozen(uid)) {
             freezeController.setFrozen(uid, false)
         }
@@ -228,9 +235,31 @@ class FreezeEngine(
             engineFrozenKeys.remove(key)
             if (ctx != null) {
                 val uid = resolveUid(ctx, packageOf(key), userIdOf(key))
+                frozenUidToKey.remove(uid)
                 if (freezeController.isAppUid(uid)) {
                     freezeController.setFrozen(uid, false)
                 }
+            }
+        }
+        frozenUidToKey.clear()
+    }
+
+    // O(1) hot-path check for the binder hook: is this uid currently frozen by the engine?
+    fun isUidFrozenFast(uid: Int): Boolean = frozenUidToKey.containsKey(uid)
+
+    // Step A observation only: log a reportBinderTrans whose int args hit a frozen uid, so we can
+    // confirm which class has traffic, which arg is the target uid, and arg5's real meaning.
+    // Removed once the semantics are confirmed.
+    fun observeBinderTrans(cls: String, args: List<Any?>) {
+        if (!RuntimeLog.verbose || args.size != 8) return
+        for (i in 0..4) {
+            val v = args[i] as? Int ?: continue
+            if (isUidFrozenFast(v)) {
+                xposed.log(
+                    Log.INFO, TAG,
+                    "binderTrans hit cls=$cls argIdx=$i uid=$v arg5=${args[5]} all=$args"
+                )
+                break
             }
         }
     }

@@ -53,6 +53,7 @@ class NemuriModule : XposedModule() {
         hookVpnState(classLoader)
         hookCachedAppOptimizerControl(classLoader)
         hookActivityUsageStats(classLoader)
+        hookBinderTransObserve(classLoader)
         hookMethods(
             classLoader,
             "com.android.server.am.ActivityManagerService",
@@ -238,6 +239,45 @@ class NemuriModule : XposedModule() {
         }
     }
 
+    // Step A: observe reportBinderTrans across HyperOS's candidate freeze classes. The signature on
+    // this device is (int x5, boolean, long, long); the arg semantics and which class actually has
+    // traffic must be confirmed on-device, so for now we only log hits against frozen uids.
+    private fun hookBinderTransObserve(classLoader: ClassLoader) {
+        for (className in BINDER_TRANS_CLASSES) {
+            val targetClass = try {
+                Class.forName(className, false, classLoader)
+            } catch (tr: Throwable) {
+                continue // not present on this device, fine
+            }
+            var installed = 0
+            for (method in targetClass.declaredMethods) {
+                if (method.name != "reportBinderTrans" || !isBinderTransSignature(method.parameterTypes)) {
+                    continue
+                }
+                try {
+                    method.isAccessible = true
+                    hook(method).intercept(BinderTransObserveHooker(className))
+                    installed++
+                } catch (tr: Throwable) {
+                    log(Log.ERROR, TAG, "Failed to hook $className#reportBinderTrans", tr)
+                }
+            }
+            if (installed > 0) {
+                log(Log.INFO, TAG, "Hook installed: $className#reportBinderTrans ($installed overloads)")
+            }
+        }
+    }
+
+    // reportBinderTrans(int, int, int, int, int, boolean, long, long)
+    private fun isBinderTransSignature(p: Array<Class<*>>): Boolean {
+        if (p.size != 8) return false
+        val i = Int::class.javaPrimitiveType
+        val z = Boolean::class.javaPrimitiveType
+        val j = Long::class.javaPrimitiveType
+        return p[0] == i && p[1] == i && p[2] == i && p[3] == i && p[4] == i &&
+            p[5] == z && p[6] == j && p[7] == j
+    }
+
     private fun hookMethods(classLoader: ClassLoader, className: String, vararg methodNames: String) {
         val targetClass = try {
             Class.forName(className, false, classLoader)
@@ -382,6 +422,19 @@ class NemuriModule : XposedModule() {
         }
     }
 
+    // Step A: forward reportBinderTrans to the engine's observer (logging only).
+    private inner class BinderTransObserveHooker(private val cls: String) : XposedInterface.Hooker {
+        override fun intercept(chain: XposedInterface.Chain): Any? {
+            val result = chain.proceed()
+            try {
+                runtimeBridge?.freezeEngine?.observeBinderTrans(cls, chain.args)
+            } catch (throwable: Throwable) {
+                // hot path: swallow
+            }
+            return result
+        }
+    }
+
     // useFreezer() -> Z. Replace with FALSE so the framework thinks its freezer is unavailable.
     private inner class UseFreezerHooker : XposedInterface.Hooker {
         override fun intercept(chain: XposedInterface.Chain): Any = java.lang.Boolean.FALSE
@@ -409,5 +462,15 @@ class NemuriModule : XposedModule() {
 
     private companion object {
         const val TAG = "Nemuri"
+
+        // HyperOS has both Greeze and SmartPower freeze stacks; reportBinderTrans exists on several
+        // classes. Hook all present ones for observation, then narrow to the one with real traffic.
+        val BINDER_TRANS_CLASSES = arrayOf(
+            "com.miui.server.greeze.GreezeManagerService",
+            "com.miui.server.greeze.GreezeManagerService\$TmpCallback",
+            "com.android.server.am.AppStateManager\$PowerFrozenCallback",
+            "com.android.server.am.SmartPowerService",
+            "com.miui.server.smartpower.PowerFrozenManager",
+        )
     }
 }
