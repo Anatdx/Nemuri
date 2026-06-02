@@ -20,6 +20,7 @@ import android.text.TextUtils
 import android.util.Log
 import io.github.libxposed.api.XposedInterface
 import java.util.concurrent.ConcurrentHashMap
+import java.util.zip.ZipFile
 
 // Observation layer: computes each background app's active freeze-policy exemptions as a
 // NemuriBridgeProtocol EXEMPT_* bitmask. Detection only -- never freezes. Location not wired yet.
@@ -93,8 +94,24 @@ class AppExemptionDetector(private val xposed: XposedInterface) {
     }
 
     private fun isXposedModule(info: ApplicationInfo): Boolean {
+        // Legacy Xposed declares it via manifest meta-data; cheap, check first.
         val meta = info.metaData
-        return meta != null && (meta.containsKey("xposedmodule") || meta.containsKey("xposedminversion"))
+        if (meta != null && (meta.containsKey("xposedmodule") || meta.containsKey("xposedminversion"))) {
+            return true
+        }
+        // Modern libxposed modules (e.g. HyperCeiler) carry no such meta-data; they declare
+        // themselves via files inside the apk. Scan the apk for the new (META-INF/xposed/) and
+        // old (assets/xposed_init) markers. Cached per package by the caller, so the apk is
+        // opened at most once per package.
+        val apkPath = info.sourceDir ?: return false
+        return try {
+            ZipFile(apkPath).use { zip ->
+                zip.getEntry("META-INF/xposed/module.prop") != null ||
+                    zip.getEntry("assets/xposed_init") != null
+            }
+        } catch (ignored: Throwable) {
+            false
+        }
     }
 
     private fun activePlaybackUids(context: Context): Set<Int> {
