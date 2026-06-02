@@ -95,6 +95,11 @@ class AppsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { pushPolicy() }
     }
 
+    fun setBinderUnfreeze(enabled: Boolean) {
+        settingsStore.binderUnfreezeEnabled = enabled
+        viewModelScope.launch { pushPolicy() }
+    }
+
     // Push current saved prefs + loaded whitelist to system_server. Waits for policies to finish
     // loading first, so the whitelist is complete.
     suspend fun pushPolicy() {
@@ -104,6 +109,7 @@ class AppsViewModel(application: Application) : AndroidViewModel(application) {
             enabled = settingsStore.autoFreezeEnabled,
             whitelist = whitelistedPackages(),
             delayMs = settingsStore.freezeDelaySeconds * 1000L,
+            binderUnfreeze = settingsStore.binderUnfreezeEnabled,
         )
     }
 

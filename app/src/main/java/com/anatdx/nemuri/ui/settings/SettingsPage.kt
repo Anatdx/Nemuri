@@ -32,6 +32,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AcUnit
+import androidx.compose.material.icons.rounded.SyncAlt
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Folder
@@ -85,6 +86,7 @@ fun SettingsPage(
     val scope = rememberCoroutineScope()
     var verboseLogging by remember { mutableStateOf(settingsStore.verboseLogging) }
     var autoFreeze by remember { mutableStateOf(settingsStore.autoFreezeEnabled) }
+    var binderUnfreeze by remember { mutableStateOf(settingsStore.binderUnfreezeEnabled) }
     var showAbout by remember { mutableStateOf(false) }
 
     val exportLauncher = rememberLauncherForActivityResult(
@@ -139,6 +141,16 @@ fun SettingsPage(
                     onCheckedChange = { enabled ->
                         autoFreeze = enabled
                         appsViewModel.setAutoFreeze(enabled)
+                    }
+                )
+                ToggleRow(
+                    icon = Icons.Rounded.SyncAlt,
+                    title = stringResource(R.string.setting_binder_unfreeze),
+                    description = stringResource(R.string.setting_binder_unfreeze_description),
+                    checked = binderUnfreeze,
+                    onCheckedChange = { enabled ->
+                        binderUnfreeze = enabled
+                        appsViewModel.setBinderUnfreeze(enabled)
                     }
                 )
             }

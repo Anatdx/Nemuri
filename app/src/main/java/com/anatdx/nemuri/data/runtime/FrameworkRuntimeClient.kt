@@ -149,6 +149,7 @@ object FrameworkRuntimeClient {
         enabled: Boolean,
         whitelist: List<String>,
         delayMs: Long,
+        binderUnfreeze: Boolean,
     ): Boolean = withContext(Dispatchers.IO) {
         runCatching {
             val binder = requestRuntimeBinder(context.applicationContext) ?: return@withContext false
@@ -158,6 +159,7 @@ object FrameworkRuntimeClient {
                 data.writeInterfaceToken(NemuriBridgeProtocol.DESCRIPTOR)
                 data.writeInt(if (enabled) 1 else 0)
                 data.writeLong(delayMs)
+                data.writeInt(if (binderUnfreeze) 1 else 0)
                 data.writeInt(whitelist.size)
                 whitelist.forEach { data.writeString(it) }
                 val handled = binder.transact(NemuriBridgeProtocol.TRANSACTION_SET_POLICY, data, reply, 0)

@@ -102,9 +102,9 @@ class FreezeEngine(
         }
     }
 
-    fun applyPolicy(enabled: Boolean, delayMs: Long, whitelist: Set<String>): Boolean {
+    fun applyPolicy(enabled: Boolean, delayMs: Long, binderUnfreeze: Boolean, whitelist: Set<String>): Boolean {
         val wasEnabled = policyStore.isEnabled()
-        policyStore.apply(enabled, delayMs, whitelist)
+        policyStore.apply(enabled, delayMs, binderUnfreeze, whitelist)
         if (wasEnabled && !enabled) {
             thawAllEngineFrozen() // turning the engine off releases everything it froze
         }

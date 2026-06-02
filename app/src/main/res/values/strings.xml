@@ -93,6 +93,8 @@
     <string name="settings_description">Import or export config, control logging, and view app info.</string>
     <string name="setting_auto_freeze">Enable auto freeze</string>
     <string name="setting_auto_freeze_description">Freeze user apps a few seconds after they leave the foreground (exemptions and whitelist excluded).</string>
+    <string name="setting_binder_unfreeze">Binder temporary unfreeze</string>
+    <string name="setting_binder_unfreeze_description">Briefly unfreeze a frozen app when another app makes a synchronous binder call to it, to avoid hangs.</string>
     <string name="setting_wake_guard">Wake guard</string>
     <string name="setting_wake_guard_description">Reserved for abnormal wakeups, service starts, and Binder interactions.</string>
     <string name="setting_debug_logs">Verbose logging</string>

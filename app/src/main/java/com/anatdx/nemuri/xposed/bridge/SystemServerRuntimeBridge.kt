@@ -305,13 +305,14 @@ class SystemServerRuntimeBridge(
                 if (code == NemuriBridgeProtocol.TRANSACTION_SET_POLICY) {
                     val enabled = data.readInt() != 0
                     val delayMs = data.readLong()
+                    val binderUnfreeze = data.readInt() != 0
                     val n = maxOf(0, data.readInt())
                     val whitelist = HashSet<String>()
                     for (i in 0 until n) {
                         val pkg = data.readString()
                         if (!pkg.isNullOrEmpty()) whitelist.add(pkg)
                     }
-                    val ok = freezeEngine.applyPolicy(enabled, delayMs, whitelist)
+                    val ok = freezeEngine.applyPolicy(enabled, delayMs, binderUnfreeze, whitelist)
                     reply?.writeNoException()
                     reply?.writeInt(if (ok) NemuriBridgeProtocol.REPLY_SUCCESS else NemuriBridgeProtocol.REPLY_FAILURE)
                     return true

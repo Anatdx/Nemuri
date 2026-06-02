@@ -93,6 +93,8 @@
     <string name="settings_description">导入导出配置、控制日志输出、查看应用信息。</string>
     <string name="setting_auto_freeze">启用自动冻结</string>
     <string name="setting_auto_freeze_description">用户应用切到后台几秒后自动冻结（豁免和白名单除外）。</string>
+    <string name="setting_binder_unfreeze">Binder 临时解冻</string>
+    <string name="setting_binder_unfreeze_description">当别的应用通过同步 binder 调用某个被冻应用时，短暂解冻它，避免调用方卡住。</string>
     <string name="setting_wake_guard">唤醒保护</string>
     <string name="setting_wake_guard_description">后续用于处理异常唤醒、服务拉起和 Binder 交互。</string>
     <string name="setting_debug_logs">详细日志输出</string>

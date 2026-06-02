@@ -38,9 +38,10 @@ class FreezePolicyStore(private val xposed: XposedInterface) {
 
     fun whitelistSnapshot(): Set<String> = HashSet(whitelist)
 
-    fun apply(enabled: Boolean, delayMs: Long, newWhitelist: Set<String>) {
+    fun apply(enabled: Boolean, delayMs: Long, binderUnfreeze: Boolean, newWhitelist: Set<String>) {
         autoFreezeEnabled = enabled
         freezeDelayMs = if (delayMs > 0) delayMs else DEFAULT_DELAY_MS
+        binderUnfreezeEnabled = binderUnfreeze
         whitelist.clear()
         whitelist.addAll(newWhitelist)
         save()
@@ -58,6 +59,7 @@ class FreezePolicyStore(private val xposed: XposedInterface) {
             val root = JSONObject(file.readText())
             autoFreezeEnabled = root.optBoolean("autoFreezeEnabled", false)
             freezeDelayMs = root.optLong("freezeDelayMs", DEFAULT_DELAY_MS)
+            binderUnfreezeEnabled = root.optBoolean("binderUnfreezeEnabled", true)
             whitelist.clear()
             val arr = root.optJSONArray("whitelist")
             if (arr != null) {
@@ -92,6 +94,7 @@ class FreezePolicyStore(private val xposed: XposedInterface) {
             root.put("version", 1)
             root.put("autoFreezeEnabled", autoFreezeEnabled)
             root.put("freezeDelayMs", freezeDelayMs)
+            root.put("binderUnfreezeEnabled", binderUnfreezeEnabled)
             val arr = JSONArray()
             for (pkg in whitelist) arr.put(pkg)
             root.put("whitelist", arr)
