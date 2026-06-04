@@ -255,7 +255,7 @@ class SystemServerRuntimeBridge(
             context.sendStickyBroadcast(intent)
             xposed.log(Log.INFO, TAG, "Published Nemuri runtime Binder sticky broadcast.")
             freezeEngine.onBoot() // load persisted auto-freeze policy once the system is ready
-            binderUnfreezeCoordinator.startIfAvailable() // start Re-Kernel backend if present
+            binderUnfreezeCoordinator.startIfAvailable() // pick binder-unfreeze backend (Embian/Re-Kernel/Millet)
         } catch (throwable: Throwable) {
             binderPublished.set(false)
             xposed.log(Log.WARN, TAG, "Failed to publish Nemuri runtime Binder sticky broadcast", throwable)

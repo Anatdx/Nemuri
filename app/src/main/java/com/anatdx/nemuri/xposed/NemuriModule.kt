@@ -432,8 +432,8 @@ class NemuriModule : XposedModule() {
             val result = chain.proceed()
             try {
                 val bridge = runtimeBridge ?: return result
-                // Re-Kernel backend, once active, owns binder unfreezing -- yield to it.
-                if (bridge.binderUnfreezeCoordinator.isRekernelActive()) return result
+                // A kernel backend (Embian/Re-Kernel), once active, owns binder unfreezing -- yield.
+                if (bridge.binderUnfreezeCoordinator.isKernelBackendActive()) return result
                 val dstUid = chain.args.firstOrNull() as? Int ?: return result
                 bridge.freezeEngine.temporaryUnfreeze(dstUid, "Binder", BINDER_UNFREEZE_MS)
             } catch (throwable: Throwable) {
