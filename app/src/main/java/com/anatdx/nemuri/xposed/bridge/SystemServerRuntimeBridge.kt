@@ -34,6 +34,8 @@ class SystemServerRuntimeBridge(
     private val vpnUids: MutableSet<Int> = ConcurrentHashMap.newKeySet()
     val freezeEngine: FreezeEngine = FreezeEngine(xposed, freezeController, exemptionDetector, vpnUids)
     val binderUnfreezeCoordinator = BinderUnfreezeCoordinator(xposed, freezeEngine)
+    private val uidFrozenStateReporter = UidFrozenStateReporter(xposed)
+    val anrSuppressor = AnrSuppressor(xposed, freezeEngine)
 
     @Volatile private var activityManagerService: Any? = null
     @Volatile private var mLruProcesses: Any? = null
@@ -47,6 +49,8 @@ class SystemServerRuntimeBridge(
 
     init {
         freezeEngine.setBridge(this)
+        freezeController.setStateReporter(uidFrozenStateReporter)
+        freezeController.setAnrSuppressor(anrSuppressor)
     }
 
     fun captureActivityManagerService(instance: Any) {
@@ -54,6 +58,7 @@ class SystemServerRuntimeBridge(
         systemContext = readContext(instance)
         mLruProcesses = readLruProcesses(instance)
         initProcessFields()
+        uidFrozenStateReporter.attach(instance)
         systemContext?.let { freezeEngine.setContext(it) }
         // Publishing is intentionally deferred to boot completion. setSystemProcess runs
         // during startBootstrapServices, long before AMS#mProcessesReady, so calling

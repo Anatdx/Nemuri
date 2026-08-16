@@ -28,6 +28,11 @@ class NemuriModule : XposedModule() {
     @Volatile
     private var runtimeBridge: SystemServerRuntimeBridge? = null
 
+    @Volatile
+    private var systemServerClassLoader: ClassLoader? = null
+
+    private val signatureProbeDone = java.util.concurrent.atomic.AtomicBoolean(false)
+
     override fun onModuleLoaded(param: XposedModuleInterface.ModuleLoadedParam) {
         log(
             Log.INFO, TAG,
@@ -47,6 +52,7 @@ class NemuriModule : XposedModule() {
     }
 
     private fun installSystemServerHooks(classLoader: ClassLoader) {
+        systemServerClassLoader = classLoader
         runtimeBridge = SystemServerRuntimeBridge(this, classLoader)
         hookActivityManagerServiceCapture(classLoader)
         hookRuntimeBinderPublish(classLoader)
@@ -54,6 +60,7 @@ class NemuriModule : XposedModule() {
         hookCachedAppOptimizerControl(classLoader)
         hookActivityUsageStats(classLoader)
         hookBinderTrans(classLoader)
+        hookAnr(classLoader)
         hookMethods(
             classLoader,
             "com.android.server.am.ActivityManagerService",
@@ -278,6 +285,82 @@ class NemuriModule : XposedModule() {
             p[5] == z && p[6] == j && p[7] == j
     }
 
+    // Drop the ANRs that freezing causes. Verified signatures on this framework:
+    //   AnrHelper#appNotResponding(ProcessRecord, TimeoutRecord)
+    //   AnrHelper#appNotResponding(ProcessRecord, String, ApplicationInfo, String,
+    //                             WindowProcessController, boolean, ExecutorService,
+    //                             TimeoutRecord, boolean)
+    //   AnrHelper#deferAppNotResponding(ProcessRecord, ..., long, boolean)
+    //   AnrHelper$AnrRecord#appNotResponding(boolean)          -- receiver holds mApp
+    //   ProcessErrorStateRecord#appNotResponding(...)          -- receiver holds mApp
+    // Everything on AnrHelper carries the ProcessRecord in arg0; the other two carry it on the
+    // instance. Hook both shapes so an ANR cannot slip through whichever path the framework takes.
+    private fun hookAnr(classLoader: ClassLoader) {
+        hookAnrOnClass(classLoader, "com.android.server.am.AnrHelper", argIndex = 0,
+            "appNotResponding", "deferAppNotResponding")
+        hookAnrOnClass(classLoader, "com.android.server.am.AnrHelper\$AnrRecord", argIndex = -1,
+            "appNotResponding")
+        hookAnrOnClass(classLoader, "com.android.server.am.ProcessErrorStateRecord", argIndex = -1,
+            "appNotResponding")
+    }
+
+    /** @param argIndex where the ProcessRecord sits, or -1 when it hangs off the receiver. */
+    private fun hookAnrOnClass(
+        classLoader: ClassLoader,
+        className: String,
+        argIndex: Int,
+        vararg methodNames: String,
+    ) {
+        val targetClass = try {
+            Class.forName(className, false, classLoader)
+        } catch (tr: Throwable) {
+            log(Log.WARN, TAG, "ANR hook target missing: $className")
+            return
+        }
+        for (methodName in methodNames) {
+            var installed = 0
+            for (method in targetClass.declaredMethods) {
+                if (method.name != methodName) continue
+                try {
+                    method.isAccessible = true
+                    hook(method).intercept(AnrHooker("$className#$methodName", argIndex))
+                    installed++
+                } catch (tr: Throwable) {
+                    log(Log.ERROR, TAG, "Failed to hook $className#$methodName${signatureOf(method)}", tr)
+                }
+            }
+            if (installed > 0) {
+                log(Log.INFO, TAG, "ANR hook installed: $className#$methodName ($installed overloads)")
+            }
+        }
+    }
+
+    private inner class AnrHooker(
+        private val label: String,
+        private val argIndex: Int,
+    ) : XposedInterface.Hooker {
+        override fun intercept(chain: XposedInterface.Chain): Any? {
+            try {
+                val suppressor = runtimeBridge?.anrSuppressor
+                if (suppressor != null) {
+                    val target = if (argIndex < 0) chain.thisObject else chain.args.getOrNull(argIndex)
+                    if (suppressor.shouldSuppress(target)) {
+                        if (RuntimeLog.verbose) {
+                            log(Log.DEBUG, TAG, "ANR suppressed at $label")
+                        }
+                        // All hooked overloads return void, so skipping the original is enough --
+                        // no ANR record is created and nothing downstream sees a null result.
+                        return null
+                    }
+                }
+            } catch (throwable: Throwable) {
+                // Deciding failed: fall through to the real ANR rather than swallowing it blindly.
+                log(Log.WARN, TAG, "ANR suppression check failed at $label", throwable)
+            }
+            return chain.proceed()
+        }
+    }
+
     private fun hookMethods(classLoader: ClassLoader, className: String, vararg methodNames: String) {
         val targetClass = try {
             Class.forName(className, false, classLoader)
@@ -332,6 +415,14 @@ class NemuriModule : XposedModule() {
         override fun intercept(chain: XposedInterface.Chain): Any? {
             val result = chain.proceed()
             runtimeBridge?.publishRuntimeBinder()
+            // Flip SIGNATURE_PROBE to dump the ANR/freeze entry points of whatever framework this is
+            // running on. Driven from here rather than onSystemServerStarting: that runs before
+            // logcat retains anything, so the output would be evicted before it can be read.
+            if (SIGNATURE_PROBE && signatureProbeDone.compareAndSet(false, true)) {
+                systemServerClassLoader?.let {
+                    com.anatdx.nemuri.xposed.bridge.FrameworkSignatureProbe.run(this@NemuriModule, it)
+                }
+            }
             return result
         }
     }
@@ -471,6 +562,10 @@ class NemuriModule : XposedModule() {
     private companion object {
         const val TAG = "Nemuri"
         const val BINDER_UNFREEZE_MS = 3000L
+
+        // Dev switch: dumps the framework's real ANR/freeze signatures at boot. Vendor forks reshape
+        // these methods, so turn it on when porting to a new ROM and hook against what it reports.
+        const val SIGNATURE_PROBE = false
 
         // HyperOS has both Greeze and SmartPower freeze stacks; reportBinderTrans exists on several
         // classes. Hook all present ones for observation, then narrow to the one with real traffic.

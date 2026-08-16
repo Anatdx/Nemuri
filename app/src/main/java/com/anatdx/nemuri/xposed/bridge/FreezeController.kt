@@ -22,6 +22,23 @@ class FreezeController(private val xposed: XposedInterface) {
     private val isolatedLayout: Boolean =
         !File("$CGROUP_V2/uid_1000/cgroup.freeze").exists()
 
+    // Set once the bridge has AMS. Every successful state change is mirrored to the framework so its
+    // bookkeeping matches the cgroup; see UidFrozenStateReporter for why that matters.
+    @Volatile
+    private var stateReporter: UidFrozenStateReporter? = null
+
+    // Notified on thaw so it can tell an ANR incurred while frozen from one the app owns.
+    @Volatile
+    private var anrSuppressor: AnrSuppressor? = null
+
+    fun setStateReporter(reporter: UidFrozenStateReporter) {
+        stateReporter = reporter
+    }
+
+    fun setAnrSuppressor(suppressor: AnrSuppressor) {
+        anrSuppressor = suppressor
+    }
+
     fun isAppUid(uid: Int): Boolean {
         val appId = uid % PER_USER_RANGE
         return appId in FIRST_APPLICATION_UID..LAST_APPLICATION_UID
@@ -37,11 +54,18 @@ class FreezeController(private val xposed: XposedInterface) {
             if (RuntimeLog.verbose) {
                 xposed.log(Log.INFO, TAG, "cgroup.freeze=" + (if (frozen) 1 else 0) + " uid=" + uid)
             }
+            onStateChanged(uid, frozen)
             true
         } catch (throwable: Throwable) {
             xposed.log(Log.WARN, TAG, "Failed to write cgroup.freeze for uid $uid", throwable)
             false
         }
+    }
+
+    // Single funnel for "the cgroup write landed", so no freeze path can forget to announce itself.
+    private fun onStateChanged(uid: Int, frozen: Boolean) {
+        stateReporter?.report(uid, frozen)
+        if (!frozen) anrSuppressor?.onThawed(uid)
     }
 
     fun isFrozen(uid: Int): Boolean {
@@ -82,6 +106,7 @@ class FreezeController(private val xposed: XposedInterface) {
 
     private fun writeFreeze(uid: Int, frozen: Boolean): Boolean = try {
         PrintWriter(freezePath(uid)).use { it.write(if (frozen) "1" else "0") }
+        onStateChanged(uid, frozen)
         true
     } catch (ignored: Throwable) {
         false

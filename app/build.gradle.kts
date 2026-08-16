@@ -6,10 +6,14 @@ plugins {
 fun readSecret(vararg names: String): String? {
     fun String.cleaned() = trim().takeIf { it.isNotEmpty() }
 
+    // Optional convenience for fish users; absent on other shells/platforms, where a failed exec
+    // must not abort configuration (it surfaces as an unrelated "compileSdk missing" error).
     fun readFishVariable(name: String): String? {
-        return providers.exec {
-            commandLine("fish", "-lc", "if set -q $name; printf %s \\$$name; end")
-        }.standardOutput.asText.get().cleaned()
+        return runCatching {
+            providers.exec {
+                commandLine("fish", "-lc", "if set -q $name; printf %s \\$$name; end")
+            }.standardOutput.asText.get().cleaned()
+        }.getOrNull()
     }
 
     return names.firstNotNullOfOrNull { name ->

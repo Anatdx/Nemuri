@@ -250,9 +250,13 @@ class FreezeEngine(
     // Called from reportBinderTrans (binder hot path) when a frozen app is the target of a binder
     // transaction: thaw it for a window so the call can be served, then re-freeze. Hot path: the
     // O(1) map lookup returns immediately for the vast majority (non-frozen uids).
-    fun temporaryUnfreeze(uid: Int, reason: String, durationMs: Long) {
+    //
+    // @param force thaw even with binder unfreeze switched off. That setting governs speculative
+    //   thawing on binder traffic; a caller passing force has evidence the app is already stalling
+    //   something (an ANR), where refusing to thaw would hide the symptom and leave the stall.
+    fun temporaryUnfreeze(uid: Int, reason: String, durationMs: Long, force: Boolean = false) {
         val key = frozenUidToKey[uid] ?: return
-        if (!policyStore.isBinderUnfreezeEnabled()) return
+        if (!force && !policyStore.isBinderUnfreezeEnabled()) return
         try {
             if (freezeController.isAppUid(uid) && freezeController.isFrozen(uid)) {
                 freezeController.setFrozen(uid, false)
