@@ -26,6 +26,7 @@ class EmbianClient(
     private val onFirstMessage: () -> Unit,
 ) {
     @Volatile private var running = false
+    @Volatile private var stopRequested = false
     @Volatile private var fd: FileDescriptor? = null
     @Volatile private var firstSeen = false
     private var thread: Thread? = null
@@ -35,6 +36,7 @@ class EmbianClient(
 
     fun start() {
         if (running || thread != null) return
+        stopRequested = false
         // Named "system_server" so its kernel comm satisfies Embian's prctl gate (see loop()), and
         // so it blends in rather than standing out as a fingerprint thread in a hidden module.
         thread = Thread({ loop() }, COMM_SYSTEM_SERVER).apply {
@@ -45,19 +47,32 @@ class EmbianClient(
     }
 
     fun stop() {
+        stopRequested = true
         running = false
+        val worker = thread
         try {
             fd?.let { Os.close(it) }
         } catch (ignored: Throwable) {
         }
+        if (worker != null && worker !== Thread.currentThread()) {
+            try {
+                worker.join(STOP_TIMEOUT_MS)
+            } catch (ignored: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+        }
+        fd = null
+        thread = null
     }
 
     private fun loop() {
+        if (stopRequested) return
         // Embian's prctl gate checks current->comm == "system_server" (a per-thread name). This
         // worker isn't the main thread, so adopt that comm first or discover/register get denied;
         // ART routes setName for the current thread through prctl(PR_SET_NAME), changing comm.
         Thread.currentThread().name = COMM_SYSTEM_SERVER
         val unit = discoverUnit()
+        if (stopRequested) return
         if (unit !in NETLINK_MIN..NETLINK_MAX) {
             xposed.log(Log.INFO, TAG, "Embian unavailable (prctl discover failed)")
             return
@@ -77,6 +92,10 @@ class EmbianClient(
         }
         if (portid <= 0 || !registerClient(portid)) {
             xposed.log(Log.WARN, TAG, "Embian register failed (portid=$portid); falling back")
+            try { Os.close(descriptor) } catch (ignored: Throwable) {}
+            return
+        }
+        if (stopRequested) {
             try { Os.close(descriptor) } catch (ignored: Throwable) {}
             return
         }
@@ -101,6 +120,9 @@ class EmbianClient(
             }
         }
         try { Os.close(descriptor) } catch (ignored: Throwable) {}
+        running = false
+        fd = null
+        thread = null
     }
 
     // Netlink frame: nlmsghdr(16) + embian_netlink_msg(32) + payload(embian_binder_event).
@@ -202,5 +224,6 @@ class EmbianClient(
         const val NL_MSG_EVENT = 0x8003
         const val EVENT_BINDER_TRANSACTION = 1
         const val EVENT_BINDER_REPLY = 2
+        const val STOP_TIMEOUT_MS = 1000L
     }
 }

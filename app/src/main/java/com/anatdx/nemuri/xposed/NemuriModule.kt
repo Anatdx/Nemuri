@@ -18,12 +18,16 @@ import com.anatdx.nemuri.xposed.bridge.SystemServerRuntimeBridge
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
+import java.lang.reflect.Executable
 import java.lang.reflect.Method
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 class NemuriModule : XposedModule() {
     private val hookHitCounters = ConcurrentHashMap<String, AtomicInteger>()
+    private val activeHookIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    private val activeHookHandles = ConcurrentHashMap<String, XposedInterface.HookHandle>()
 
     @Volatile
     private var runtimeBridge: SystemServerRuntimeBridge? = null
@@ -31,7 +35,7 @@ class NemuriModule : XposedModule() {
     @Volatile
     private var systemServerClassLoader: ClassLoader? = null
 
-    private val signatureProbeDone = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val signatureProbeDone = AtomicBoolean(false)
 
     override fun onModuleLoaded(param: XposedModuleInterface.ModuleLoadedParam) {
         log(
@@ -51,9 +55,65 @@ class NemuriModule : XposedModule() {
         log(Log.DEBUG, TAG, "Package ready: ${param.packageName}")
     }
 
+    override fun onHotReloading(param: XposedModuleInterface.HotReloadingParam): Boolean {
+        val classLoader = systemServerClassLoader ?: return false
+        val bridge = runtimeBridge ?: return false
+        return try {
+            val state = arrayOf(classLoader, bridge.snapshotAndStopForHotReload())
+            param.setSavedInstanceState(state)
+            log(Log.INFO, TAG, "Hot reload state saved; old runtime stopped")
+            true
+        } catch (throwable: Throwable) {
+            log(Log.ERROR, TAG, "Failed to prepare hot reload", throwable)
+            false
+        }
+    }
+
+    override fun onHotReloaded(param: XposedModuleInterface.HotReloadedParam) {
+        val state = param.savedInstanceState as? Array<*>
+        val classLoader = state?.getOrNull(0) as? ClassLoader
+        val bridgeState = state?.getOrNull(1) as? Array<*>
+        if (!param.isSystemServer || classLoader == null || bridgeState == null) {
+            log(Log.ERROR, TAG, "Hot reload state is incomplete; removing old hooks")
+            param.oldHookHandles.forEach { it.unhook() }
+            return
+        }
+
+        try {
+            systemServerClassLoader = classLoader
+            runtimeBridge = SystemServerRuntimeBridge(this, classLoader).also {
+                it.restoreAfterHotReload(bridgeState)
+            }
+            activeHookIds.clear()
+            activeHookHandles.clear()
+            for (handle in param.oldHookHandles) {
+                val executable = handle.executable
+                val hooker = hookerFor(executable)
+                if (hooker == null) {
+                    handle.unhook()
+                    continue
+                }
+                val id = hookId(executable)
+                val replacement = handle.replaceHook(hooker)
+                activeHookIds.add(id)
+                activeHookHandles[id] = replacement
+            }
+            installSystemServerHooks(classLoader)
+            log(Log.INFO, TAG, "Hot reload completed: hooks=${activeHookIds.size}")
+        } catch (throwable: Throwable) {
+            log(Log.ERROR, TAG, "Hot reload failed; removing old hooks", throwable)
+            activeHookHandles.values.forEach { runCatching { it.unhook() } }
+            param.oldHookHandles.forEach { runCatching { it.unhook() } }
+            activeHookIds.clear()
+            activeHookHandles.clear()
+            runtimeBridge?.let { runCatching { it.snapshotAndStopForHotReload() } }
+            runtimeBridge = null
+        }
+    }
+
     private fun installSystemServerHooks(classLoader: ClassLoader) {
         systemServerClassLoader = classLoader
-        runtimeBridge = SystemServerRuntimeBridge(this, classLoader)
+        if (runtimeBridge == null) runtimeBridge = SystemServerRuntimeBridge(this, classLoader)
         hookActivityManagerServiceCapture(classLoader)
         hookRuntimeBinderPublish(classLoader)
         hookVpnState(classLoader)
@@ -91,8 +151,7 @@ class NemuriModule : XposedModule() {
             if (method.name != "setSystemProcess") continue
             try {
                 method.isAccessible = true
-                hook(method).intercept(ActivityManagerCaptureHooker())
-                installed++
+                if (installHook(method, ActivityManagerCaptureHooker())) installed++
             } catch (tr: Throwable) {
                 log(Log.ERROR, TAG, "Failed to hook ActivityManagerService#setSystemProcess", tr)
             }
@@ -117,8 +176,7 @@ class NemuriModule : XposedModule() {
                 if (method.name != methodName) continue
                 try {
                     method.isAccessible = true
-                    hook(method).intercept(RuntimeBinderPublishHooker())
-                    installed++
+                    if (installHook(method, RuntimeBinderPublishHooker())) installed++
                 } catch (tr: Throwable) {
                     log(Log.ERROR, TAG, "Failed to hook ActivityManagerService#$methodName for Binder publish", tr)
                 }
@@ -141,8 +199,7 @@ class NemuriModule : XposedModule() {
             if (method.name != "updateState") continue
             try {
                 method.isAccessible = true
-                hook(method).intercept(VpnStateHooker())
-                installed++
+                if (installHook(method, VpnStateHooker())) installed++
             } catch (tr: Throwable) {
                 log(Log.ERROR, TAG, "Failed to hook Vpn#updateState", tr)
             }
@@ -167,14 +224,16 @@ class NemuriModule : XposedModule() {
             try {
                 if (name == "useFreezer" && method.parameterTypes.isEmpty()) {
                     method.isAccessible = true
-                    hook(method).intercept(UseFreezerHooker())
-                    log(Log.INFO, TAG, "Hook installed: CachedAppOptimizer#useFreezer (force-disabled)")
+                    if (installHook(method, UseFreezerHooker())) {
+                        log(Log.INFO, TAG, "Hook installed: CachedAppOptimizer#useFreezer (force-disabled)")
+                    }
                 } else if (name == "enableFreezer" && method.parameterTypes.size == 1 &&
                     method.parameterTypes[0] == Boolean::class.javaPrimitiveType
                 ) {
                     method.isAccessible = true
-                    hook(method).intercept(EnableFreezerHooker())
-                    log(Log.INFO, TAG, "Hook installed: CachedAppOptimizer#enableFreezer (force-disabled)")
+                    if (installHook(method, EnableFreezerHooker())) {
+                        log(Log.INFO, TAG, "Hook installed: CachedAppOptimizer#enableFreezer (force-disabled)")
+                    }
                 }
             } catch (tr: Throwable) {
                 log(Log.ERROR, TAG, "Failed to hook CachedAppOptimizer#$name", tr)
@@ -206,8 +265,7 @@ class NemuriModule : XposedModule() {
             }
             try {
                 method.isAccessible = true
-                hook(method).intercept(ActivityUsageStatsHooker())
-                installed++
+                if (installHook(method, ActivityUsageStatsHooker())) installed++
             } catch (tr: Throwable) {
                 log(Log.ERROR, TAG, "Failed to hook updateActivityUsageStats", tr)
             }
@@ -235,8 +293,7 @@ class NemuriModule : XposedModule() {
             }
             try {
                 method.isAccessible = true
-                hook(method).intercept(ProcessStartHooker())
-                installed++
+                if (installHook(method, ProcessStartHooker())) installed++
             } catch (tr: Throwable) {
                 log(Log.ERROR, TAG, "Failed to hook ProcessList#startProcessLocked", tr)
             }
@@ -263,8 +320,7 @@ class NemuriModule : XposedModule() {
                 }
                 try {
                     method.isAccessible = true
-                    hook(method).intercept(BinderTransActionHooker())
-                    installed++
+                    if (installHook(method, BinderTransActionHooker())) installed++
                 } catch (tr: Throwable) {
                     log(Log.ERROR, TAG, "Failed to hook $className#reportBinderTrans", tr)
                 }
@@ -323,8 +379,7 @@ class NemuriModule : XposedModule() {
                 if (method.name != methodName) continue
                 try {
                     method.isAccessible = true
-                    hook(method).intercept(AnrHooker("$className#$methodName", argIndex))
-                    installed++
+                    if (installHook(method, AnrHooker("$className#$methodName", argIndex))) installed++
                 } catch (tr: Throwable) {
                     log(Log.ERROR, TAG, "Failed to hook $className#$methodName${signatureOf(method)}", tr)
                 }
@@ -374,8 +429,7 @@ class NemuriModule : XposedModule() {
                 if (method.name != methodName) continue
                 try {
                     method.isAccessible = true
-                    hook(method).intercept(ProbeHooker("$className#$methodName"))
-                    installed++
+                    if (installHook(method, ProbeHooker("$className#$methodName"))) installed++
                 } catch (tr: Throwable) {
                     log(Log.ERROR, TAG, "Failed to hook $className#$methodName${signatureOf(method)}", tr)
                 }
@@ -383,6 +437,58 @@ class NemuriModule : XposedModule() {
             if (installed > 0) {
                 log(Log.INFO, TAG, "Hook installed: $className#$methodName ($installed overloads)")
             }
+        }
+    }
+
+    private fun installHook(method: Method, hooker: XposedInterface.Hooker): Boolean {
+        val id = hookId(method)
+        if (!activeHookIds.add(id)) return false
+        return try {
+            activeHookHandles[id] = hook(method).setId(id).intercept(hooker)
+            true
+        } catch (throwable: Throwable) {
+            activeHookIds.remove(id)
+            throw throwable
+        }
+    }
+
+    private fun hookId(executable: Executable): String = buildString {
+        append(executable.declaringClass.name)
+        append('#')
+        append(executable.name)
+        append('(')
+        executable.parameterTypes.joinTo(this, separator = ",") { it.name }
+        append(')')
+    }
+
+    private fun hookerFor(executable: Executable): XposedInterface.Hooker? {
+        val method = executable as? Method ?: return null
+        val className = method.declaringClass.name
+        val methodName = method.name
+        return when {
+            className == CLASS_AMS && methodName == "setSystemProcess" ->
+                ActivityManagerCaptureHooker()
+            className == CLASS_AMS && methodName in RUNTIME_BINDER_METHODS ->
+                RuntimeBinderPublishHooker()
+            className == CLASS_VPN && methodName == "updateState" ->
+                VpnStateHooker()
+            className == CLASS_CACHED_APP_OPTIMIZER && methodName == "useFreezer" ->
+                UseFreezerHooker()
+            className == CLASS_CACHED_APP_OPTIMIZER && methodName == "enableFreezer" ->
+                EnableFreezerHooker()
+            className == CLASS_AMS && methodName == "updateActivityUsageStats" ->
+                ActivityUsageStatsHooker()
+            className == CLASS_PROCESS_LIST && methodName == "startProcessLocked" ->
+                ProcessStartHooker()
+            className in BINDER_TRANS_CLASSES && methodName == "reportBinderTrans" ->
+                BinderTransActionHooker()
+            className == CLASS_ANR_HELPER && methodName in ANR_HELPER_METHODS ->
+                AnrHooker("$className#$methodName", 0)
+            className in ANR_RECEIVER_CLASSES && methodName == "appNotResponding" ->
+                AnrHooker("$className#$methodName", -1)
+            PROBE_METHODS[className]?.contains(methodName) == true ->
+                ProbeHooker("$className#$methodName")
+            else -> null
         }
     }
 
@@ -562,6 +668,29 @@ class NemuriModule : XposedModule() {
     private companion object {
         const val TAG = "Nemuri"
         const val BINDER_UNFREEZE_MS = 3000L
+        const val CLASS_AMS = "com.android.server.am.ActivityManagerService"
+        const val CLASS_PROCESS_LIST = "com.android.server.am.ProcessList"
+        const val CLASS_CACHED_APP_OPTIMIZER = "com.android.server.am.CachedAppOptimizer"
+        const val CLASS_VPN = "com.android.server.connectivity.Vpn"
+        const val CLASS_ANR_HELPER = "com.android.server.am.AnrHelper"
+
+        val RUNTIME_BINDER_METHODS = setOf("systemReady", "finishBooting")
+        val ANR_HELPER_METHODS = setOf("appNotResponding", "deferAppNotResponding")
+        val ANR_RECEIVER_CLASSES = setOf(
+            "com.android.server.am.AnrHelper\$AnrRecord",
+            "com.android.server.am.ProcessErrorStateRecord",
+        )
+        val PROBE_METHODS = mapOf(
+            CLASS_AMS to setOf("forceStopPackage", "killUid", "killPackageProcessesLSP"),
+            CLASS_CACHED_APP_OPTIMIZER to setOf(
+                "freezeAppAsyncLSP",
+                "unfreezeAppLSP",
+                "freezeProcess",
+                "unfreezeProcess",
+                "setProcessFrozen",
+            ),
+            "com.android.server.wm.ActivityTaskManagerService" to setOf("moveTaskToBack", "removeTask"),
+        )
 
         // Dev switch: dumps the framework's real ANR/freeze signatures at boot. Vendor forks reshape
         // these methods, so turn it on when porting to a new ROM and hook against what it reports.

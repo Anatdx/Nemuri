@@ -85,6 +85,15 @@ class UidFrozenStateReporter(private val xposed: XposedInterface) {
         }
     }
 
+    fun snapshotForHotReload(): HashMap<Int, Boolean> = HashMap(reportedFrozen)
+
+    fun restoreAfterHotReload(snapshot: Map<*, *>) {
+        reportedFrozen.clear()
+        for ((uid, frozen) in snapshot) {
+            if (uid is Int && frozen is Boolean) reportedFrozen[uid] = frozen
+        }
+    }
+
     private companion object {
         const val TAG = "Nemuri"
 

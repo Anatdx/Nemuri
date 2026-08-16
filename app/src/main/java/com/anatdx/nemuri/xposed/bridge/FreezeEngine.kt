@@ -32,6 +32,7 @@ class FreezeEngine(
     private val policyStore = FreezePolicyStore(xposed)
     private val states = ConcurrentHashMap<String, AppFreezeState>()
     private val engineFrozenKeys: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    private val freezeDeadlines = ConcurrentHashMap<String, Long>()
 
     // uid -> "userId#pkg" for the apps the engine has frozen. Lets the binder hot path decide
     // "is this uid frozen?" with an O(1) lookup, no cgroup read or PackageManager. Maintained in
@@ -47,19 +48,26 @@ class FreezeEngine(
     @Volatile
     private var bridge: SystemServerRuntimeBridge? = null
 
+    @Volatile
+    private var active = true
+
+    private val thread: HandlerThread
     private val handler: Handler
 
     init {
-        val thread = HandlerThread("Nemuri-Freezer")
+        thread = HandlerThread("Nemuri-Freezer")
         thread.setUncaughtExceptionHandler { _, e ->
             xposed.log(Log.ERROR, TAG, "Freezer thread uncaught", e)
         }
         thread.start()
         handler = object : Handler(thread.looper) {
             override fun handleMessage(msg: Message) {
+                if (!active) return
                 try {
                     if (msg.what == MSG_FREEZE && msg.obj is String) {
-                        freezer(msg.obj as String)
+                        val key = msg.obj as String
+                        freezeDeadlines.remove(key)
+                        freezer(key)
                     } else if (msg.what == MSG_SWEEP) {
                         sweepBackgroundApps()
                         // reschedule the next sweep
@@ -84,6 +92,72 @@ class FreezeEngine(
         this.dryRun = dryRun
     }
 
+    fun snapshotAndStopForHotReload(): Array<Any?> {
+        active = false
+        handler.removeCallbacksAndMessages(null)
+        thread.quitSafely()
+        try {
+            thread.join(STOP_TIMEOUT_MS)
+        } catch (ignored: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
+        val visibleTokens = HashMap<String, ArrayList<IBinder>>()
+        for ((key, state) in states) {
+            val tokens = state.snapshotTokens()
+            if (tokens.isNotEmpty()) visibleTokens[key] = tokens
+        }
+        val snapshot = arrayOf<Any?>(
+            visibleTokens,
+            HashMap(frozenUidToKey),
+            HashMap(freezeDeadlines),
+            dryRun,
+        )
+        freezeDeadlines.clear()
+        return snapshot
+    }
+
+    fun restoreAfterHotReload(snapshot: Array<*>) {
+        policyStore.load()
+        states.clear()
+        val visibleTokens = snapshot.getOrNull(0) as? Map<*, *>
+        if (visibleTokens != null) {
+            for ((keyValue, tokenValue) in visibleTokens) {
+                val key = keyValue as? String ?: continue
+                val tokens = (tokenValue as? Collection<*>)?.filterIsInstance<IBinder>() ?: continue
+                if (tokens.isNotEmpty()) {
+                    states.getOrPut(key) { AppFreezeState() }.restoreTokens(tokens)
+                }
+            }
+        }
+
+        engineFrozenKeys.clear()
+        frozenUidToKey.clear()
+        val frozen = snapshot.getOrNull(1) as? Map<*, *>
+        if (frozen != null) {
+            for ((uidValue, keyValue) in frozen) {
+                val uid = uidValue as? Int ?: continue
+                val key = keyValue as? String ?: continue
+                if (freezeController.isFrozen(uid)) {
+                    frozenUidToKey[uid] = key
+                    engineFrozenKeys.add(key)
+                }
+            }
+        }
+
+        dryRun = snapshot.getOrNull(3) as? Boolean ?: false
+        val now = android.os.SystemClock.uptimeMillis()
+        val deadlines = snapshot.getOrNull(2) as? Map<*, *>
+        if (deadlines != null && policyStore.isEnabled()) {
+            for ((keyValue, deadlineValue) in deadlines) {
+                val key = keyValue as? String ?: continue
+                val deadline = deadlineValue as? Long ?: continue
+                scheduleFreeze(key, (deadline - now).coerceAtLeast(0L))
+            }
+        }
+        handler.removeMessages(MSG_SWEEP)
+        handler.sendMessageDelayed(handler.obtainMessage(MSG_SWEEP), SWEEP_FIRST_DELAY_MS)
+    }
+
     // Called at boot completion: load persisted policy and clear any stale frozen apps left in
     // cgroup from a previous run (the engine re-drives freezing from fresh activity events, so
     // nothing should start out frozen -- this recovers anything stuck across a framework reload).
@@ -103,6 +177,7 @@ class FreezeEngine(
     }
 
     fun applyPolicy(enabled: Boolean, delayMs: Long, binderUnfreeze: Boolean, whitelist: Set<String>): Boolean {
+        if (!active) return false
         val wasEnabled = policyStore.isEnabled()
         policyStore.apply(enabled, delayMs, binderUnfreeze, whitelist)
         if (wasEnabled && !enabled) {
@@ -116,7 +191,8 @@ class FreezeEngine(
     // immediately, not only by the periodic sweep. freezer() does the full recheck on fire.
     // Kept extremely light: this runs in the AMS lock on a hot path; real work is on our thread.
     fun onProcessStarted(packageName: String?, uid: Int) {
-        if (!policyStore.isEnabled()
+        if (!active
+            || !policyStore.isEnabled()
             || packageName.isNullOrEmpty()
             || NemuriBridgeProtocol.MANAGER_PACKAGE_NAME == packageName
             || !freezeController.isAppUid(uid)
@@ -127,14 +203,14 @@ class FreezeEngine(
         val key = (uid / 100000).toString() + "#" + packageName
         val state = states[key]
         if (state != null && state.isVisible()) return
-        if (!handler.hasMessages(MSG_FREEZE, key)) {
-            handler.sendMessageDelayed(handler.obtainMessage(MSG_FREEZE, key), policyStore.getDelayMs())
+        if (!freezeDeadlines.containsKey(key)) {
+            scheduleFreeze(key, policyStore.getDelayMs())
         }
     }
 
     // From the ATMS hook. activity may be null for some events; event is a UsageEvents.Event.
     fun onActivityEvent(activity: ComponentName?, userId: Int, event: Int, token: IBinder?) {
-        if (activity == null || token == null) return
+        if (!active || activity == null || token == null) return
         val pkg = activity.packageName
         if (pkg.isNullOrEmpty()) return
         val key = "$userId#$pkg"
@@ -151,15 +227,15 @@ class FreezeEngine(
         if (!transitioned) return
         if (state.isVisible()) {
             // back to foreground: cancel pending freeze, thaw now
-            handler.removeMessages(MSG_FREEZE, key)
+            cancelFreeze(key)
             thawNow(key, pkg, userId)
             if (RuntimeLog.verbose) {
                 xposed.log(Log.DEBUG, TAG, "foreground $pkg")
             }
         } else {
             // went to background: schedule delayed freeze
-            if (!handler.hasMessages(MSG_FREEZE, key)) {
-                handler.sendMessageDelayed(handler.obtainMessage(MSG_FREEZE, key), policyStore.getDelayMs())
+            if (!freezeDeadlines.containsKey(key)) {
+                scheduleFreeze(key, policyStore.getDelayMs())
                 if (RuntimeLog.verbose) {
                     xposed.log(Log.DEBUG, TAG, "background $pkg -> freeze in ${policyStore.getDelayMs()}ms")
                 }
@@ -171,7 +247,7 @@ class FreezeEngine(
     // isn't frozen yet. freezer() does the full recheck when the timer fires, so this only needs
     // to ensure a timer exists. Covers boot-autostarted apps that never sent an activity event.
     private fun sweepBackgroundApps() {
-        if (!policyStore.isEnabled()) return
+        if (!active || !policyStore.isEnabled()) return
         val b = bridge ?: return
         for (ref in b.snapshotBackgroundApps()) {
             if (NemuriBridgeProtocol.MANAGER_PACKAGE_NAME == ref.packageName
@@ -184,14 +260,14 @@ class FreezeEngine(
             val key = (ref.uid / 100000).toString() + "#" + ref.packageName
             val state = states[key]
             if (state != null && state.isVisible()) continue // currently foreground
-            if (!handler.hasMessages(MSG_FREEZE, key)) {
-                handler.sendMessageDelayed(handler.obtainMessage(MSG_FREEZE, key), policyStore.getDelayMs())
+            if (!freezeDeadlines.containsKey(key)) {
+                scheduleFreeze(key, policyStore.getDelayMs())
             }
         }
     }
 
     private fun freezer(key: String) {
-        if (!policyStore.isEnabled()) return
+        if (!active || !policyStore.isEnabled()) return
         val pkg = packageOf(key)
         val userId = userIdOf(key)
         if (NemuriBridgeProtocol.MANAGER_PACKAGE_NAME == pkg) return // never freeze ourselves
@@ -255,6 +331,7 @@ class FreezeEngine(
     //   thawing on binder traffic; a caller passing force has evidence the app is already stalling
     //   something (an ANR), where refusing to thaw would hide the symptom and leave the stall.
     fun temporaryUnfreeze(uid: Int, reason: String, durationMs: Long, force: Boolean = false) {
+        if (!active) return
         val key = frozenUidToKey[uid] ?: return
         if (!force && !policyStore.isBinderUnfreezeEnabled()) return
         try {
@@ -268,11 +345,23 @@ class FreezeEngine(
             }
             // Re-freeze after the window via freezer(), which re-checks exemptions/whitelist/visibility
             // (so a return-to-foreground or whitelisting during the window won't get re-frozen).
-            handler.removeMessages(MSG_FREEZE, key)
-            handler.sendMessageDelayed(handler.obtainMessage(MSG_FREEZE, key), durationMs)
+            scheduleFreeze(key, durationMs)
         } catch (throwable: Throwable) {
             xposed.log(Log.WARN, TAG, "temporaryUnfreeze failed uid=$uid", throwable)
         }
+    }
+
+    private fun scheduleFreeze(key: String, delayMs: Long) {
+        if (!active) return
+        handler.removeMessages(MSG_FREEZE, key)
+        val safeDelay = delayMs.coerceAtLeast(0L)
+        freezeDeadlines[key] = android.os.SystemClock.uptimeMillis() + safeDelay
+        handler.sendMessageDelayed(handler.obtainMessage(MSG_FREEZE, key), safeDelay)
+    }
+
+    private fun cancelFreeze(key: String) {
+        freezeDeadlines.remove(key)
+        handler.removeMessages(MSG_FREEZE, key)
     }
 
     private fun resolveUid(ctx: Context, pkg: String, userId: Int): Int = try {
@@ -303,5 +392,6 @@ class FreezeEngine(
         // time; this only catches anything the hooks might have missed, so it can be infrequent.
         const val SWEEP_FIRST_DELAY_MS = 60_000L
         const val SWEEP_INTERVAL_MS = 300_000L
+        const val STOP_TIMEOUT_MS = 1000L
     }
 }

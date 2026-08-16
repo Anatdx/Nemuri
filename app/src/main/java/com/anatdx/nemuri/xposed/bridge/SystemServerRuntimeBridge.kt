@@ -37,6 +37,8 @@ class SystemServerRuntimeBridge(
     private val uidFrozenStateReporter = UidFrozenStateReporter(xposed)
     val anrSuppressor = AnrSuppressor(xposed, freezeEngine)
 
+    @Volatile private var runtimeBinderActive = true
+
     @Volatile private var activityManagerService: Any? = null
     @Volatile private var mLruProcesses: Any? = null
     @Volatile private var systemContext: Context? = null
@@ -70,6 +72,39 @@ class SystemServerRuntimeBridge(
     fun onVpnStateChanged(uid: Int, connected: Boolean) {
         if (uid <= 0) return
         if (connected) vpnUids.add(uid) else vpnUids.remove(uid)
+    }
+
+    fun snapshotAndStopForHotReload(): Array<Any?> {
+        val ams = activityManagerService
+            ?: throw IllegalStateException("ActivityManagerService was not captured")
+        val snapshot = arrayOf<Any?>(
+            ams,
+            freezeEngine.snapshotAndStopForHotReload(),
+            HashSet(vpnUids),
+            anrSuppressor.snapshotForHotReload(),
+            uidFrozenStateReporter.snapshotForHotReload(),
+            RuntimeLog.verbose,
+        )
+        runtimeBinderActive = false
+        binderUnfreezeCoordinator.stop()
+        return snapshot
+    }
+
+    fun restoreAfterHotReload(snapshot: Array<*>) {
+        val ams = snapshot.getOrNull(0)
+            ?: throw IllegalArgumentException("Hot reload state has no ActivityManagerService")
+        RuntimeLog.verbose = snapshot.getOrNull(5) as? Boolean ?: RuntimeLog.verbose
+        captureActivityManagerService(ams)
+
+        vpnUids.clear()
+        val restoredVpnUids = snapshot.getOrNull(2) as? Collection<*>
+        if (restoredVpnUids != null) vpnUids.addAll(restoredVpnUids.filterIsInstance<Int>())
+        (snapshot.getOrNull(3) as? Map<*, *>)?.let(anrSuppressor::restoreAfterHotReload)
+        (snapshot.getOrNull(4) as? Map<*, *>)?.let(uidFrozenStateReporter::restoreAfterHotReload)
+        val engineState = snapshot.getOrNull(1) as? Array<*>
+            ?: throw IllegalArgumentException("Hot reload state has no freeze engine state")
+        freezeEngine.restoreAfterHotReload(engineState)
+        check(publishRuntimeBinder(coldStart = false)) { "Failed to publish runtime Binder" }
     }
 
     private fun readContext(instance: Any): Context? = try {
@@ -245,25 +280,32 @@ class SystemServerRuntimeBridge(
     }
 
     fun publishRuntimeBinder() {
-        if (!binderPublished.compareAndSet(false, true)) return
-        try {
+        publishRuntimeBinder(coldStart = true)
+    }
+
+    private fun publishRuntimeBinder(coldStart: Boolean): Boolean {
+        if (!binderPublished.compareAndSet(false, true)) return true
+        return try {
             val context = systemContext
             if (context == null) {
                 binderPublished.set(false)
                 xposed.log(Log.WARN, TAG, "Cannot publish Nemuri runtime Binder without system context")
-                return
+                false
+            } else {
+                val intent = Intent(NemuriBridgeProtocol.ACTION_BINDER)
+                val extras = Bundle()
+                extras.putBinder(NemuriBridgeProtocol.EXTRA_BRIDGE_BINDER, runtimeBinder)
+                intent.putExtras(extras)
+                context.sendStickyBroadcast(intent)
+                xposed.log(Log.INFO, TAG, "Published Nemuri runtime Binder sticky broadcast.")
+                if (coldStart) freezeEngine.onBoot()
+                binderUnfreezeCoordinator.startIfAvailable()
+                true
             }
-            val intent = Intent(NemuriBridgeProtocol.ACTION_BINDER)
-            val extras = Bundle()
-            extras.putBinder(NemuriBridgeProtocol.EXTRA_BRIDGE_BINDER, runtimeBinder)
-            intent.putExtras(extras)
-            context.sendStickyBroadcast(intent)
-            xposed.log(Log.INFO, TAG, "Published Nemuri runtime Binder sticky broadcast.")
-            freezeEngine.onBoot() // load persisted auto-freeze policy once the system is ready
-            binderUnfreezeCoordinator.startIfAvailable() // pick binder-unfreeze backend (Embian/Re-Kernel/Millet)
         } catch (throwable: Throwable) {
             binderPublished.set(false)
             xposed.log(Log.WARN, TAG, "Failed to publish Nemuri runtime Binder sticky broadcast", throwable)
+            false
         }
     }
 
@@ -273,6 +315,7 @@ class SystemServerRuntimeBridge(
                 reply?.writeString(NemuriBridgeProtocol.DESCRIPTOR)
                 return true
             }
+            if (!runtimeBinderActive) return false
             if (code != NemuriBridgeProtocol.TRANSACTION_GET_BACKGROUND_PROCESSES &&
                 code != NemuriBridgeProtocol.TRANSACTION_SET_FROZEN &&
                 code != NemuriBridgeProtocol.TRANSACTION_SET_LOG_ENABLED &&

@@ -28,12 +28,14 @@ class RekernelClient(
     private val onFirstMessage: () -> Unit,
 ) {
     @Volatile private var running = false
+    @Volatile private var stopRequested = false
     @Volatile private var fd: FileDescriptor? = null
     @Volatile private var firstSeen = false
     private var thread: Thread? = null
 
     fun start() {
         if (running || thread != null) return
+        stopRequested = false
         thread = Thread({ loop() }, "Nemuri-Rekernel").apply {
             isDaemon = true
             setUncaughtExceptionHandler { _, e -> xposed.log(Log.WARN, TAG, "Rekernel thread uncaught", e) }
@@ -42,14 +44,26 @@ class RekernelClient(
     }
 
     fun stop() {
+        stopRequested = true
         running = false
+        val worker = thread
         try {
             fd?.let { Os.close(it) } // unblocks Os.read with EBADF
         } catch (ignored: Throwable) {
         }
+        if (worker != null && worker !== Thread.currentThread()) {
+            try {
+                worker.join(STOP_TIMEOUT_MS)
+            } catch (ignored: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+        }
+        fd = null
+        thread = null
     }
 
     private fun loop() {
+        if (stopRequested) return
         val unit = resolveUnit()
         val descriptor = try {
             val d = Os.socket(OsConstants.AF_NETLINK, OsConstants.SOCK_DGRAM, unit)
@@ -58,6 +72,10 @@ class RekernelClient(
             d
         } catch (throwable: Throwable) {
             xposed.log(Log.WARN, TAG, "Re-Kernel netlink blocked (SELinux/errno/reflect); falling back to Millet", throwable)
+            return
+        }
+        if (stopRequested) {
+            try { Os.close(descriptor) } catch (ignored: Throwable) {}
             return
         }
         fd = descriptor
@@ -87,6 +105,9 @@ class RekernelClient(
             Os.close(descriptor)
         } catch (ignored: Throwable) {
         }
+        running = false
+        fd = null
+        thread = null
     }
 
     // "type=Binder,bindertype=transaction,oneway=0,target=10234;" -> temp-unfreeze target.
@@ -168,5 +189,6 @@ class RekernelClient(
         const val MAX_ERRORS = 8
         const val NLMSG_HDRLEN = 16 // aligned sizeof(struct nlmsghdr)
         const val REKERNEL_CMD_REMOVE_PROC = 1
+        const val STOP_TIMEOUT_MS = 1000L
     }
 }

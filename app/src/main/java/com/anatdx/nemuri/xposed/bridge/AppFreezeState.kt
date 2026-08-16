@@ -32,6 +32,16 @@ class AppFreezeState {
     @Synchronized
     fun isVisible(): Boolean = visible
 
+    @Synchronized
+    fun snapshotTokens(): ArrayList<IBinder> = ArrayList(visibleActivities)
+
+    @Synchronized
+    fun restoreTokens(tokens: Collection<IBinder>) {
+        visibleActivities.clear()
+        visibleActivities.addAll(tokens)
+        visible = visibleActivities.isNotEmpty()
+    }
+
     private fun setVisible(value: Boolean): Boolean {
         if (visible == value) return false
         visible = value

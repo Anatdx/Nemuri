@@ -53,6 +53,14 @@ class BinderUnfreezeCoordinator(
         xposed.log(Log.INFO, TAG, "No kernel binder backend; using Millet/Hans hook")
     }
 
+    fun stop() {
+        embianClient?.stop()
+        rekernelClient?.stop()
+        embianClient = null
+        rekernelClient = null
+        kernelBackendActive = false
+    }
+
     private companion object {
         const val TAG = "Nemuri"
         const val PROC_REKERNEL = "/proc/rekernel"

@@ -49,6 +49,19 @@ class AnrSuppressor(
         if (recentlyThawed.size > MAX_TRACKED) pruneRecentlyThawed()
     }
 
+    fun snapshotForHotReload(): HashMap<Int, Long> {
+        pruneRecentlyThawed()
+        return HashMap(recentlyThawed)
+    }
+
+    fun restoreAfterHotReload(snapshot: Map<*, *>) {
+        recentlyThawed.clear()
+        for ((uid, timestamp) in snapshot) {
+            if (uid is Int && timestamp is Long) recentlyThawed[uid] = timestamp
+        }
+        pruneRecentlyThawed()
+    }
+
     /**
      * @param target the ProcessRecord (or AnrRecord) the ANR is being filed against
      * @return true when the caller should skip the original ANR handling entirely
