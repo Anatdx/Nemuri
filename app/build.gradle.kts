@@ -3,52 +3,13 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
-fun readSecret(vararg names: String): String? {
-    fun String.cleaned() = trim().takeIf { it.isNotEmpty() }
+fun readSecret(name: String): String? =
+    providers.environmentVariable(name).orNull?.trim()?.takeIf { it.isNotEmpty() }
 
-    // Optional convenience for fish users; absent on other shells/platforms, where a failed exec
-    // must not abort configuration (it surfaces as an unrelated "compileSdk missing" error).
-    fun readFishVariable(name: String): String? {
-        return runCatching {
-            providers.exec {
-                commandLine("fish", "-lc", "if set -q $name; printf %s \\$$name; end")
-            }.standardOutput.asText.get().cleaned()
-        }.getOrNull()
-    }
-
-    return names.firstNotNullOfOrNull { name ->
-        providers.gradleProperty(name).orNull?.cleaned()
-            ?: providers.environmentVariable(name).orNull?.cleaned()
-            ?: readFishVariable(name)
-    }
-}
-
-val releaseStoreFile = readSecret(
-    "NEMURI_KEYSTORE",
-    "NEMURI_KEYSTORE_FILE",
-    "NEMURI_STORE_FILE",
-    "ANDROID_KEYSTORE",
-    "ANDROID_STORE_FILE",
-    "STORE_FILE"
-)
-val releaseStorePassword = readSecret(
-    "NEMURI_KEYSTORE_PASSWORD",
-    "NEMURI_STORE_PASSWORD",
-    "ANDROID_KEYSTORE_PASSWORD",
-    "ANDROID_STORE_PASSWORD",
-    "STORE_PASSWORD"
-)
-val releaseKeyAlias = readSecret(
-    "NEMURI_KEY_ALIAS",
-    "NEMURI_ALIAS",
-    "ANDROID_KEY_ALIAS",
-    "KEY_ALIAS"
-)
-val releaseKeyPassword = readSecret(
-    "NEMURI_KEY_PASSWORD",
-    "ANDROID_KEY_PASSWORD",
-    "KEY_PASSWORD"
-) ?: releaseStorePassword
+val releaseStoreFile = readSecret("NEMURI_KEYSTORE")
+val releaseStorePassword = readSecret("NEMURI_KEYSTORE_PASSWORD")
+val releaseKeyAlias = readSecret("NEMURI_KEY_ALIAS")
+val releaseKeyPassword = readSecret("NEMURI_KEY_PASSWORD")
 val nemuriBaseVersion = "0.1.0"
 val gitCommitCount = providers.exec {
     commandLine("git", "rev-list", "--count", "HEAD")
