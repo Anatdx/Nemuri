@@ -63,7 +63,7 @@ android {
     defaultConfig {
         applicationId = "com.anatdx.nemuri"
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 37
         versionCode = gitCommitCount.get()
         versionName = "$nemuriBaseVersion-${gitCommitCount.get().toString().padStart(4, '0')}"
     }
